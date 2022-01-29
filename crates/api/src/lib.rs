@@ -119,6 +119,9 @@ pub async fn match_websocket_operation(
       do_websocket_operation::<TransferCommunity>(context, id, op, data).await
     }
     UserOperation::LeaveAdmin => do_websocket_operation::<LeaveAdmin>(context, id, op, data).await,
+    UserOperation::GetSiteTaglines => {
+      do_websocket_operation::<GetSiteTaglines>(context, id, op, data).await
+    }
 
     // Community ops
     UserOperation::FollowCommunity => {

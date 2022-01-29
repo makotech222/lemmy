@@ -1,7 +1,7 @@
 use crate::sensitive::Sensitive;
 use lemmy_db_schema::{
   newtypes::{CommentId, CommunityId, PersonId, PostId},
-  source::language::Language,
+  source::{language::Language, tagline::Tagline},
   ListingType,
   ModlogActionType,
   SearchType,
@@ -170,6 +170,7 @@ pub struct GetSiteResponse {
   pub my_user: Option<MyUserInfo>,
   pub federated_instances: Option<FederatedInstances>, // Federation may be disabled
   pub all_languages: Vec<Language>,
+  pub tagline: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -262,4 +263,14 @@ pub struct GetUnreadRegistrationApplicationCount {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GetUnreadRegistrationApplicationCountResponse {
   pub registration_applications: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetSiteTaglines {
+  pub auth: Option<Sensitive<String>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetSiteTaglinesResponse {
+  pub taglines: Vec<Tagline>,
 }

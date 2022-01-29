@@ -146,6 +146,7 @@ pub enum UserOperation {
   PurgeCommunity,
   PurgePost,
   PurgeComment,
+  GetSiteTaglines,
 }
 
 #[derive(EnumString, Display, Debug, Clone)]

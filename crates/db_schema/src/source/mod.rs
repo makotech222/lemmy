@@ -20,3 +20,4 @@ pub mod private_message;
 pub mod registration_application;
 pub mod secret;
 pub mod site;
+pub mod tagline;

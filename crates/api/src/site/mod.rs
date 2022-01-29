@@ -4,3 +4,4 @@ mod purge;
 mod registration_applications;
 mod resolve_object;
 mod search;
+mod tagline;

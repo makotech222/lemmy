@@ -516,6 +516,13 @@ table! {
     }
 }
 
+table! {
+    tagline (id) {
+        id -> Int4,
+        content -> Varchar,
+    }
+}
+
 // These are necessary since diesel doesn't have self joins / aliases
 table! {
     person_alias_1 (id) {
