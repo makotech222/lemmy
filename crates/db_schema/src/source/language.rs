@@ -1,14 +1,12 @@
 use crate::newtypes::LanguageId;
-use serde::{Deserialize, Serialize};
-
 #[cfg(feature = "full")]
 use crate::schema::language;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "language")]
+#[cfg_attr(feature = "full", diesel(table_name = language))]
 pub struct Language {
-  #[serde(skip)]
   pub id: LanguageId,
   pub code: String,
   pub name: String,

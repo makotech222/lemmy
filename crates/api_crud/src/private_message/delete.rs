@@ -1,11 +1,14 @@
 use crate::PerformCrud;
 use actix_web::web::Data;
 use lemmy_api_common::{
-  person::{DeletePrivateMessage, PrivateMessageResponse},
+  private_message::{DeletePrivateMessage, PrivateMessageResponse},
   utils::{blocking, get_local_user_view_from_jwt},
 };
 use lemmy_apub::activities::deletion::send_apub_delete_private_message;
-use lemmy_db_schema::{source::private_message::PrivateMessage, traits::Crud};
+use lemmy_db_schema::{
+  source::private_message::{PrivateMessage, PrivateMessageUpdateForm},
+  traits::Crud,
+};
 use lemmy_utils::{error::LemmyError, ConnectionId};
 use lemmy_websocket::{send::send_pm_ws_message, LemmyContext, UserOperationCrud};
 
@@ -37,7 +40,13 @@ impl PerformCrud for DeletePrivateMessage {
     let private_message_id = data.private_message_id;
     let deleted = data.deleted;
     let updated_private_message = blocking(context.pool(), move |conn| {
-      PrivateMessage::update_deleted(conn, private_message_id, deleted)
+      PrivateMessage::update(
+        conn,
+        private_message_id,
+        &PrivateMessageUpdateForm::builder()
+          .deleted(Some(deleted))
+          .build(),
+      )
     })
     .await?
     .map_err(|e| LemmyError::from_error_message(e, "couldnt_update_private_message"))?;

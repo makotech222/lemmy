@@ -16,6 +16,7 @@ use lemmy_db_schema::{
   source::{
     comment::{CommentLike, CommentLikeForm},
     comment_reply::CommentReply,
+    local_site::LocalSite,
   },
   traits::Likeable,
 };
@@ -35,13 +36,14 @@ impl Perform for CreateCommentLike {
     websocket_id: Option<ConnectionId>,
   ) -> Result<CommentResponse, LemmyError> {
     let data: &CreateCommentLike = self;
+    let local_site = blocking(context.pool(), LocalSite::read).await??;
     let local_user_view =
       get_local_user_view_from_jwt(&data.auth, context.pool(), context.secret()).await?;
 
     let mut recipient_ids = Vec::<LocalUserId>::new();
 
     // Don't do a downvote if site has downvotes disabled
-    check_downvotes_enabled(data.score, context.pool()).await?;
+    check_downvotes_enabled(data.score, &local_site)?;
 
     let comment_id = data.comment_id;
     let orig_comment = blocking(context.pool(), move |conn| {
@@ -92,7 +94,7 @@ impl Perform for CreateCommentLike {
     let do_add = like_form.score != 0 && (like_form.score == 1 || like_form.score == -1);
     if do_add {
       let like_form2 = like_form.clone();
-      let like = move |conn: &'_ _| CommentLike::like(conn, &like_form2);
+      let like = move |conn: &mut _| CommentLike::like(conn, &like_form2);
       blocking(context.pool(), like)
         .await?
         .map_err(|e| LemmyError::from_error_message(e, "couldnt_like_comment"))?;

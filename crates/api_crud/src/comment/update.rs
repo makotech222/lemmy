@@ -1,3 +1,4 @@
+use crate::PerformCrud;
 use actix_web::web::Data;
 use lemmy_api_common::{
   comment::{CommentResponse, EditComment},
@@ -8,13 +9,21 @@ use lemmy_api_common::{
     check_post_deleted_or_removed,
     get_local_user_view_from_jwt,
     is_mod_or_admin,
+    local_site_to_slur_regex,
   },
 };
 use lemmy_apub::protocol::activities::{
   create_or_update::comment::CreateOrUpdateComment,
   CreateOrUpdateType,
 };
-use lemmy_db_schema::source::comment::Comment;
+use lemmy_db_schema::{
+  source::{
+    actor_language::CommunityLanguage,
+    comment::{Comment, CommentUpdateForm},
+    local_site::LocalSite,
+  },
+  traits::Crud,
+};
 use lemmy_db_views::structs::CommentView;
 use lemmy_utils::{
   error::LemmyError,
@@ -26,8 +35,6 @@ use lemmy_websocket::{
   LemmyContext,
   UserOperationCrud,
 };
-
-use crate::PerformCrud;
 
 #[async_trait::async_trait(?Send)]
 impl PerformCrud for EditComment {
@@ -42,13 +49,13 @@ impl PerformCrud for EditComment {
     let data: &EditComment = self;
     let local_user_view =
       get_local_user_view_from_jwt(&data.auth, context.pool(), context.secret()).await?;
+    let local_site = blocking(context.pool(), LocalSite::read).await??;
 
     let comment_id = data.comment_id;
     let orig_comment = blocking(context.pool(), move |conn| {
       CommentView::read(conn, comment_id, None)
     })
     .await??;
-    let mut updated_comment = orig_comment.comment.clone();
 
     // TODO is this necessary? It should really only need to check on create
     check_community_ban(
@@ -65,7 +72,7 @@ impl PerformCrud for EditComment {
       return Err(LemmyError::from_message("no_comment_edit_allowed"));
     }
 
-    if let Some(distinguished) = data.distinguished {
+    if data.distinguished.is_some() {
       // Verify that only a mod or admin can distinguish a comment
       is_mod_or_admin(
         context.pool(),
@@ -73,24 +80,30 @@ impl PerformCrud for EditComment {
         orig_comment.community.id,
       )
       .await?;
-
-      updated_comment = blocking(context.pool(), move |conn| {
-        Comment::update_distinguished(conn, comment_id, distinguished)
-      })
-      .await?
-      .map_err(|e| LemmyError::from_error_message(e, "couldnt_update_comment"))?;
     }
 
+    let language_id = self.language_id;
+    blocking(context.pool(), move |conn| {
+      CommunityLanguage::is_allowed_community_language(conn, language_id, orig_comment.community.id)
+    })
+    .await??;
+
     // Update the Content
-    if let Some(content) = &data.content {
-      let content_slurs_removed = remove_slurs(content, &context.settings().slur_regex());
-      let comment_id = data.comment_id;
-      updated_comment = blocking(context.pool(), move |conn| {
-        Comment::update_content(conn, comment_id, &content_slurs_removed)
-      })
-      .await?
-      .map_err(|e| LemmyError::from_error_message(e, "couldnt_update_comment"))?;
-    };
+    let content_slurs_removed = data
+      .content
+      .as_ref()
+      .map(|c| remove_slurs(c, &local_site_to_slur_regex(&local_site)));
+    let comment_id = data.comment_id;
+    let form = CommentUpdateForm::builder()
+      .content(content_slurs_removed)
+      .distinguished(data.distinguished)
+      .language_id(data.language_id)
+      .build();
+    let updated_comment = blocking(context.pool(), move |conn| {
+      Comment::update(conn, comment_id, &form)
+    })
+    .await?
+    .map_err(|e| LemmyError::from_error_message(e, "couldnt_update_comment"))?;
 
     // Do the mentions / recipients
     let updated_comment_content = updated_comment.content.to_owned();

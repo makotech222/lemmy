@@ -5,7 +5,10 @@ use lemmy_api_common::{
   utils::{blocking, check_private_instance, get_local_user_view_from_jwt_opt},
 };
 use lemmy_apub::{fetcher::resolve_actor_identifier, objects::person::ApubPerson};
-use lemmy_db_schema::{source::person::Person, utils::post_to_comment_sort_type};
+use lemmy_db_schema::{
+  source::{local_site::LocalSite, person::Person},
+  utils::post_to_comment_sort_type,
+};
 use lemmy_db_views::{comment_view::CommentQuery, post_view::PostQuery};
 use lemmy_db_views_actor::structs::{CommunityModeratorView, PersonViewSafe};
 use lemmy_utils::{error::LemmyError, ConnectionId};
@@ -31,13 +34,15 @@ impl PerformCrud for GetPersonDetails {
     let local_user_view =
       get_local_user_view_from_jwt_opt(data.auth.as_ref(), context.pool(), context.secret())
         .await?;
-    check_private_instance(&local_user_view, context.pool()).await?;
+    let local_site = blocking(context.pool(), LocalSite::read).await??;
+
+    check_private_instance(&local_user_view, &local_site)?;
 
     let person_details_id = match data.person_id {
       Some(id) => id,
       None => {
         if let Some(username) = &data.username {
-          resolve_actor_identifier::<ApubPerson, Person>(username, context)
+          resolve_actor_identifier::<ApubPerson, Person>(username, context, true)
             .await
             .map_err(|e| e.with_message("couldnt_find_that_username_or_email"))?
             .id
@@ -61,44 +66,53 @@ impl PerformCrud for GetPersonDetails {
     let limit = data.limit;
     let saved_only = data.saved_only;
     let community_id = data.community_id;
+    let local_user = local_user_view.map(|l| l.local_user);
+    let local_user_clone = local_user.to_owned();
 
-    let (posts, comments) = blocking(context.pool(), move |conn| {
+    let posts = blocking(context.pool(), move |conn| {
       let posts_query = PostQuery::builder()
         .conn(conn)
         .sort(sort)
         .saved_only(saved_only)
-        .community_id(community_id)
-        .page(page)
-        .limit(limit);
-
-      let local_user = local_user_view.map(|l| l.local_user);
-      let comments_query = CommentQuery::builder()
-        .conn(conn)
         .local_user(local_user.as_ref())
-        .sort(sort.map(post_to_comment_sort_type))
-        .saved_only(saved_only)
         .community_id(community_id)
         .page(page)
         .limit(limit);
 
       // If its saved only, you don't care what creator it was
       // Or, if its not saved, then you only want it for that specific creator
-      let (posts, comments) = if !saved_only.unwrap_or(false) {
-        (
-          posts_query
-            .creator_id(Some(person_details_id))
-            .build()
-            .list()?,
-          comments_query
-            .creator_id(Some(person_details_id))
-            .build()
-            .list()?,
-        )
+      if !saved_only.unwrap_or(false) {
+        posts_query
+          .creator_id(Some(person_details_id))
+          .build()
+          .list()
       } else {
-        (posts_query.build().list()?, comments_query.build().list()?)
-      };
+        posts_query.build().list()
+      }
+    })
+    .await??;
 
-      Ok((posts, comments)) as Result<_, LemmyError>
+    let comments = blocking(context.pool(), move |conn| {
+      let comments_query = CommentQuery::builder()
+        .conn(conn)
+        .local_user(local_user_clone.as_ref())
+        .sort(sort.map(post_to_comment_sort_type))
+        .saved_only(saved_only)
+        .show_deleted_and_removed(Some(false))
+        .community_id(community_id)
+        .page(page)
+        .limit(limit);
+
+      // If its saved only, you don't care what creator it was
+      // Or, if its not saved, then you only want it for that specific creator
+      if !saved_only.unwrap_or(false) {
+        comments_query
+          .creator_id(Some(person_details_id))
+          .build()
+          .list()
+      } else {
+        comments_query.build().list()
+      }
     })
     .await??;
 

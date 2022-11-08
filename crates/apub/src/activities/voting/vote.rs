@@ -13,12 +13,11 @@ use crate::{
   PostOrComment,
 };
 use activitypub_federation::{core::object_id::ObjectId, data::Data, traits::ActivityHandler};
-use activitystreams_kinds::public;
 use anyhow::anyhow;
 use lemmy_api_common::utils::blocking;
 use lemmy_db_schema::{
   newtypes::CommunityId,
-  source::{community::Community, post::Post, site::Site},
+  source::{community::Community, local_site::LocalSite, post::Post},
   traits::Crud,
 };
 use lemmy_utils::error::LemmyError;
@@ -37,7 +36,6 @@ impl Vote {
     Ok(Vote {
       actor: ObjectId::new(actor.actor_id()),
       object: ObjectId::new(object.ap_id()),
-      cc: vec![public()],
       kind: kind.clone(),
       id: generate_activity_id(kind, &context.settings().get_protocol_and_hostname())?,
       unparsed: Default::default(),
@@ -85,8 +83,11 @@ impl ActivityHandler for Vote {
   ) -> Result<(), LemmyError> {
     let community = self.get_community(context, request_counter).await?;
     verify_person_in_community(&self.actor, &community, context, request_counter).await?;
-    let site = blocking(context.pool(), Site::read_local_site).await??;
-    if self.kind == VoteType::Dislike && !site.enable_downvotes {
+    let enable_downvotes = blocking(context.pool(), LocalSite::read)
+      .await?
+      .map(|l| l.enable_downvotes)
+      .unwrap_or(true);
+    if self.kind == VoteType::Dislike && !enable_downvotes {
       return Err(anyhow!("Downvotes disabled").into());
     }
     Ok(())

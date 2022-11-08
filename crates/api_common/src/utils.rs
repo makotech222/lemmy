@@ -4,16 +4,18 @@ use lemmy_db_schema::{
   impls::person::is_banned,
   newtypes::{CommunityId, LocalUserId, PersonId, PostId},
   source::{
-    comment::Comment,
-    community::Community,
+    comment::{Comment, CommentUpdateForm},
+    community::{Community, CommunityUpdateForm},
     email_verification::{EmailVerification, EmailVerificationForm},
+    instance::Instance,
+    local_site::LocalSite,
+    local_site_rate_limit::LocalSiteRateLimit,
     password_reset_request::PasswordResetRequest,
-    person::Person,
+    person::{Person, PersonUpdateForm},
     person_block::PersonBlock,
     post::{Post, PostRead, PostReadForm},
     registration_application::RegistrationApplication,
     secret::Secret,
-    site::Site,
   },
   traits::{Crud, Readable},
   utils::DbPool,
@@ -32,9 +34,11 @@ use lemmy_utils::{
   claims::Claims,
   email::{send_email, translations::Lang},
   error::LemmyError,
+  rate_limit::RateLimitConfig,
   settings::structs::Settings,
-  utils::generate_random_string,
+  utils::{build_slur_regex, generate_random_string},
 };
+use regex::Regex;
 use reqwest_middleware::ClientWithMiddleware;
 use rosetta_i18n::{Language, LanguageId};
 use std::str::FromStr;
@@ -42,15 +46,15 @@ use tracing::warn;
 
 pub async fn blocking<F, T>(pool: &DbPool, f: F) -> Result<T, LemmyError>
 where
-  F: FnOnce(&diesel::PgConnection) -> T + Send + 'static,
+  F: FnOnce(&mut diesel::PgConnection) -> T + Send + 'static,
   T: Send + 'static,
 {
   let pool = pool.clone();
   let blocking_span = tracing::info_span!("blocking operation");
   actix_web::web::block(move || {
     let entered = blocking_span.enter();
-    let conn = pool.get()?;
-    let res = (f)(&conn);
+    let mut conn = pool.get()?;
+    let res = (f)(&mut conn);
     drop(entered);
     Ok(res) as Result<T, LemmyError>
   })
@@ -219,7 +223,7 @@ pub async fn check_community_ban(
   pool: &DbPool,
 ) -> Result<(), LemmyError> {
   let is_banned =
-    move |conn: &'_ _| CommunityPersonBanView::get(conn, person_id, community_id).is_ok();
+    move |conn: &mut _| CommunityPersonBanView::get(conn, person_id, community_id).is_ok();
   if blocking(pool, is_banned).await? {
     Err(LemmyError::from_message("community_ban"))
   } else {
@@ -256,7 +260,7 @@ pub async fn check_person_block(
   potential_blocker_id: PersonId,
   pool: &DbPool,
 ) -> Result<(), LemmyError> {
-  let is_blocked = move |conn: &'_ _| PersonBlock::read(conn, potential_blocker_id, my_id).is_ok();
+  let is_blocked = move |conn: &mut _| PersonBlock::read(conn, potential_blocker_id, my_id).is_ok();
   if blocking(pool, is_blocked).await? {
     Err(LemmyError::from_message("person_block"))
   } else {
@@ -265,67 +269,38 @@ pub async fn check_person_block(
 }
 
 #[tracing::instrument(skip_all)]
-pub async fn check_downvotes_enabled(score: i16, pool: &DbPool) -> Result<(), LemmyError> {
-  if score == -1 {
-    let site = blocking(pool, Site::read_local_site).await??;
-    if !site.enable_downvotes {
-      return Err(LemmyError::from_message("downvotes_disabled"));
-    }
+pub fn check_downvotes_enabled(score: i16, local_site: &LocalSite) -> Result<(), LemmyError> {
+  if score == -1 && !local_site.enable_downvotes {
+    return Err(LemmyError::from_message("downvotes_disabled"));
   }
   Ok(())
 }
 
 #[tracing::instrument(skip_all)]
-pub async fn check_private_instance(
+pub fn check_private_instance(
   local_user_view: &Option<LocalUserView>,
-  pool: &DbPool,
+  local_site: &LocalSite,
 ) -> Result<(), LemmyError> {
-  if local_user_view.is_none() {
-    let site = blocking(pool, Site::read_local_site).await?;
-
-    // The site might not be set up yet
-    if let Ok(site) = site {
-      if site.private_instance {
-        return Err(LemmyError::from_message("instance_is_private"));
-      }
-    }
+  if local_user_view.is_none() && local_site.private_instance {
+    return Err(LemmyError::from_message("instance_is_private"));
   }
   Ok(())
 }
 
 #[tracing::instrument(skip_all)]
 pub async fn build_federated_instances(
+  local_site: &LocalSite,
   pool: &DbPool,
-  settings: &Settings,
 ) -> Result<Option<FederatedInstances>, LemmyError> {
-  let federation_config = &settings.federation;
-  let hostname = &settings.hostname;
-  let federation = federation_config.to_owned();
-  if federation.enabled {
-    let distinct_communities = blocking(pool, move |conn| {
-      Community::distinct_federated_communities(conn)
-    })
-    .await??;
+  if local_site.federation_enabled {
+    // TODO I hate that this requires 3 queries
+    let linked = blocking(pool, Instance::linked).await??;
+    let allowed = blocking(pool, Instance::allowlist).await??;
+    let blocked = blocking(pool, Instance::blocklist).await??;
 
-    let allowed = federation.allowed_instances;
-    let blocked = federation.blocked_instances;
-
-    let mut linked = distinct_communities
-      .iter()
-      .map(|actor_id| Ok(actor_id.host_str().unwrap_or("").to_string()))
-      .collect::<Result<Vec<String>, LemmyError>>()?;
-
-    if let Some(allowed) = allowed.as_ref() {
-      linked.extend_from_slice(allowed);
-    }
-
-    if let Some(blocked) = blocked.as_ref() {
-      linked.retain(|a| !blocked.contains(a) && !a.eq(hostname));
-    }
-
-    // Sort and remove dupes
-    linked.sort_unstable();
-    linked.dedup();
+    // These can return empty vectors, so convert them to options
+    let allowed = (!allowed.is_empty()).then(|| allowed);
+    let blocked = (!blocked.is_empty()).then(|| blocked);
 
     Ok(Some(FederatedInstances {
       linked,
@@ -339,7 +314,7 @@ pub async fn build_federated_instances(
 
 /// Checks the password length
 pub fn password_length_check(pass: &str) -> Result<(), LemmyError> {
-  if !(10..=60).contains(&pass.len()) {
+  if !(10..=60).contains(&pass.chars().count()) {
     Err(LemmyError::from_message("invalid_password"))
   } else {
     Ok(())
@@ -452,11 +427,50 @@ pub fn send_email_verification_success(
 }
 
 pub fn get_interface_language(user: &LocalUserView) -> Lang {
-  let user_lang = LanguageId::new(user.local_user.interface_language.clone());
-  Lang::from_language_id(&user_lang).unwrap_or_else(|| {
+  lang_str_to_lang(&user.local_user.interface_language)
+}
+
+pub fn get_interface_language_from_settings(user: &LocalUserSettingsView) -> Lang {
+  lang_str_to_lang(&user.local_user.interface_language)
+}
+
+fn lang_str_to_lang(lang: &str) -> Lang {
+  let lang_id = LanguageId::new(lang);
+  Lang::from_language_id(&lang_id).unwrap_or_else(|| {
     let en = LanguageId::new("en");
     Lang::from_language_id(&en).expect("default language")
   })
+}
+
+pub fn local_site_rate_limit_to_rate_limit_config(
+  local_site_rate_limit: &LocalSiteRateLimit,
+) -> RateLimitConfig {
+  let l = local_site_rate_limit;
+  RateLimitConfig {
+    message: l.message,
+    message_per_second: l.message_per_second,
+    post: l.post,
+    post_per_second: l.post_per_second,
+    register: l.register,
+    register_per_second: l.register_per_second,
+    image: l.image,
+    image_per_second: l.image_per_second,
+    comment: l.comment,
+    comment_per_second: l.comment_per_second,
+    search: l.search,
+    search_per_second: l.search_per_second,
+  }
+}
+
+pub fn local_site_to_slur_regex(local_site: &LocalSite) -> Option<Regex> {
+  build_slur_regex(local_site.slur_filter_regex.as_deref())
+}
+
+pub fn local_site_opt_to_slur_regex(local_site: &Option<LocalSite>) -> Option<Regex> {
+  local_site
+    .as_ref()
+    .map(local_site_to_slur_regex)
+    .unwrap_or(None)
 }
 
 pub fn send_application_approved_email(
@@ -470,12 +484,39 @@ pub fn send_application_approved_email(
   send_email(&subject, email, &user.person.name, &body, settings)
 }
 
+/// Send a new applicant email notification to all admins
+pub async fn send_new_applicant_email_to_admins(
+  applicant_username: &str,
+  pool: &DbPool,
+  settings: &Settings,
+) -> Result<(), LemmyError> {
+  // Collect the admins with emails
+  let admins = blocking(pool, move |conn| {
+    LocalUserSettingsView::list_admins_with_emails(conn)
+  })
+  .await??;
+
+  let applications_link = &format!(
+    "{}/registration_applications",
+    settings.get_protocol_and_hostname(),
+  );
+
+  for admin in &admins {
+    let email = &admin.local_user.email.to_owned().expect("email");
+    let lang = get_interface_language_from_settings(admin);
+    let subject = lang.new_application_subject(applicant_username, &settings.hostname);
+    let body = lang.new_application_body(applications_link);
+    send_email(&subject, email, &admin.person.name, &body, settings)?;
+  }
+  Ok(())
+}
+
 pub async fn check_registration_application(
-  site: &Site,
   local_user_view: &LocalUserView,
+  local_site: &LocalSite,
   pool: &DbPool,
 ) -> Result<(), LemmyError> {
-  if site.require_application
+  if local_site.require_application
     && !local_user_view.local_user.accepted_application
     && !local_user_view.person.admin
   {
@@ -496,19 +537,13 @@ pub async fn check_registration_application(
   Ok(())
 }
 
-/// TODO this check should be removed after https://github.com/LemmyNet/lemmy/issues/868 is done.
-pub async fn check_private_instance_and_federation_enabled(
-  pool: &DbPool,
-  settings: &Settings,
+pub fn check_private_instance_and_federation_enabled(
+  local_site: &LocalSite,
 ) -> Result<(), LemmyError> {
-  let site_opt = blocking(pool, Site::read_local_site).await?;
-
-  if let Ok(site) = site_opt {
-    if site.private_instance && settings.federation.enabled {
-      return Err(LemmyError::from_message(
-        "Cannot have both private instance and federation enabled.",
-      ));
-    }
+  if local_site.private_instance && local_site.federation_enabled {
+    return Err(LemmyError::from_message(
+      "Cannot have both private instance and federation enabled.",
+    ));
   }
   Ok(())
 }
@@ -519,7 +554,7 @@ pub async fn purge_image_posts_for_person(
   settings: &Settings,
   client: &ClientWithMiddleware,
 ) -> Result<(), LemmyError> {
-  let posts = blocking(pool, move |conn: &'_ _| {
+  let posts = blocking(pool, move |conn: &mut _| {
     Post::fetch_pictrs_posts_for_creator(conn, banned_person_id)
   })
   .await??;
@@ -548,7 +583,7 @@ pub async fn purge_image_posts_for_community(
   settings: &Settings,
   client: &ClientWithMiddleware,
 ) -> Result<(), LemmyError> {
-  let posts = blocking(pool, move |conn: &'_ _| {
+  let posts = blocking(pool, move |conn: &mut _| {
     Post::fetch_pictrs_posts_for_community(conn, banned_community_id)
   })
   .await??;
@@ -592,12 +627,19 @@ pub async fn remove_user_data(
 
   // Update the fields to None
   blocking(pool, move |conn| {
-    Person::remove_avatar_and_banner(conn, banned_person_id)
+    Person::update(
+      conn,
+      banned_person_id,
+      &PersonUpdateForm::builder()
+        .avatar(Some(None))
+        .banner(Some(None))
+        .build(),
+    )
   })
   .await??;
 
   // Posts
-  blocking(pool, move |conn: &'_ _| {
+  blocking(pool, move |conn: &mut _| {
     Post::update_removed_for_creator(conn, banned_person_id, None, true)
   })
   .await??;
@@ -608,7 +650,7 @@ pub async fn remove_user_data(
   // Communities
   // Remove all communities where they're the top mod
   // for now, remove the communities manually
-  let first_mod_communities = blocking(pool, move |conn: &'_ _| {
+  let first_mod_communities = blocking(pool, move |conn: &mut _| {
     CommunityModeratorView::get_community_first_mods(conn)
   })
   .await??;
@@ -621,8 +663,12 @@ pub async fn remove_user_data(
 
   for first_mod_community in banned_user_first_communities {
     let community_id = first_mod_community.community.id;
-    blocking(pool, move |conn: &'_ _| {
-      Community::update_removed(conn, community_id, true)
+    blocking(pool, move |conn| {
+      Community::update(
+        conn,
+        community_id,
+        &CommunityUpdateForm::builder().removed(Some(true)).build(),
+      )
     })
     .await??;
 
@@ -637,13 +683,20 @@ pub async fn remove_user_data(
     }
     // Update the fields to None
     blocking(pool, move |conn| {
-      Community::remove_avatar_and_banner(conn, community_id)
+      Community::update(
+        conn,
+        community_id,
+        &CommunityUpdateForm::builder()
+          .icon(Some(None))
+          .banner(Some(None))
+          .build(),
+      )
     })
     .await??;
   }
 
   // Comments
-  blocking(pool, move |conn: &'_ _| {
+  blocking(pool, move |conn: &mut _| {
     Comment::update_removed_for_creator(conn, banned_person_id, true)
   })
   .await??;
@@ -678,7 +731,11 @@ pub async fn remove_user_data_in_community(
   for comment_view in &comments {
     let comment_id = comment_view.comment.id;
     blocking(pool, move |conn| {
-      Comment::update_removed(conn, comment_id, true)
+      Comment::update(
+        conn,
+        comment_id,
+        &CommentUpdateForm::builder().removed(Some(true)).build(),
+      )
     })
     .await??;
   }
@@ -707,13 +764,13 @@ pub async fn delete_user_account(
   // No need to update avatar and banner, those are handled in Person::delete_account
 
   // Comments
-  let permadelete = move |conn: &'_ _| Comment::permadelete_for_creator(conn, person_id);
+  let permadelete = move |conn: &mut _| Comment::permadelete_for_creator(conn, person_id);
   blocking(pool, permadelete)
     .await?
     .map_err(|e| LemmyError::from_error_message(e, "couldnt_update_comment"))?;
 
   // Posts
-  let permadelete = move |conn: &'_ _| Post::permadelete_for_creator(conn, person_id);
+  let permadelete = move |conn: &mut _| Post::permadelete_for_creator(conn, person_id);
   blocking(pool, permadelete)
     .await?
     .map_err(|e| LemmyError::from_error_message(e, "couldnt_update_post"))?;
@@ -726,15 +783,25 @@ pub async fn delete_user_account(
   Ok(())
 }
 
-pub async fn listing_type_with_site_default(
+pub fn listing_type_with_site_default(
   listing_type: Option<ListingType>,
-  pool: &DbPool,
+  local_site: &LocalSite,
 ) -> Result<ListingType, LemmyError> {
-  Ok(match listing_type {
-    Some(l) => l,
-    None => {
-      let site = blocking(pool, Site::read_local_site).await??;
-      ListingType::from_str(&site.default_post_listing_type)?
-    }
-  })
+  Ok(listing_type.unwrap_or(ListingType::from_str(
+    &local_site.default_post_listing_type,
+  )?))
+}
+
+#[cfg(test)]
+mod tests {
+  use crate::utils::password_length_check;
+
+  #[test]
+  #[rustfmt::skip]
+  fn password_length() {
+    assert!(password_length_check("Õ¼¾°3yË,o¸ãtÌÈú|ÇÁÙAøüÒI©·¤(T]/ð>æºWæ[C¤bªWöaÃÎñ·{=û³&§½K/c").is_ok());
+    assert!(password_length_check("1234567890").is_ok());
+    assert!(password_length_check("short").is_err());
+    assert!(password_length_check("looooooooooooooooooooooooooooooooooooooooooooooooooooooooooong").is_err());
+  }
 }

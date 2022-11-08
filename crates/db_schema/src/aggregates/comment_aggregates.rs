@@ -6,7 +6,7 @@ use crate::{
 use diesel::{result::Error, *};
 
 impl CommentAggregates {
-  pub fn read(conn: &PgConnection, comment_id: CommentId) -> Result<Self, Error> {
+  pub fn read(conn: &mut PgConnection, comment_id: CommentId) -> Result<Self, Error> {
     comment_aggregates::table
       .filter(comment_aggregates::comment_id.eq(comment_id))
       .first::<Self>(conn)
@@ -18,10 +18,11 @@ mod tests {
   use crate::{
     aggregates::comment_aggregates::CommentAggregates,
     source::{
-      comment::{Comment, CommentForm, CommentLike, CommentLikeForm},
-      community::{Community, CommunityForm},
-      person::{Person, PersonForm},
-      post::{Post, PostForm},
+      comment::{Comment, CommentInsertForm, CommentLike, CommentLikeForm},
+      community::{Community, CommunityInsertForm},
+      instance::Instance,
+      person::{Person, PersonInsertForm},
+      post::{Post, PostInsertForm},
     },
     traits::{Crud, Likeable},
     utils::establish_unpooled_connection,
@@ -31,60 +32,59 @@ mod tests {
   #[test]
   #[serial]
   fn test_crud() {
-    let conn = establish_unpooled_connection();
+    let conn = &mut establish_unpooled_connection();
 
-    let new_person = PersonForm {
-      name: "thommy_comment_agg".into(),
-      public_key: Some("pubkey".to_string()),
-      ..PersonForm::default()
-    };
+    let inserted_instance = Instance::create(conn, "my_domain.tld").unwrap();
 
-    let inserted_person = Person::create(&conn, &new_person).unwrap();
+    let new_person = PersonInsertForm::builder()
+      .name("thommy_comment_agg".into())
+      .public_key("pubkey".into())
+      .instance_id(inserted_instance.id)
+      .build();
 
-    let another_person = PersonForm {
-      name: "jerry_comment_agg".into(),
-      public_key: Some("pubkey".to_string()),
-      ..PersonForm::default()
-    };
+    let inserted_person = Person::create(conn, &new_person).unwrap();
 
-    let another_inserted_person = Person::create(&conn, &another_person).unwrap();
+    let another_person = PersonInsertForm::builder()
+      .name("jerry_comment_agg".into())
+      .public_key("pubkey".into())
+      .instance_id(inserted_instance.id)
+      .build();
 
-    let new_community = CommunityForm {
-      name: "TIL_comment_agg".into(),
-      title: "nada".to_owned(),
-      public_key: Some("pubkey".to_string()),
-      ..CommunityForm::default()
-    };
+    let another_inserted_person = Person::create(conn, &another_person).unwrap();
 
-    let inserted_community = Community::create(&conn, &new_community).unwrap();
+    let new_community = CommunityInsertForm::builder()
+      .name("TIL_comment_agg".into())
+      .title("nada".to_owned())
+      .public_key("pubkey".to_string())
+      .instance_id(inserted_instance.id)
+      .build();
 
-    let new_post = PostForm {
-      name: "A test post".into(),
-      creator_id: inserted_person.id,
-      community_id: inserted_community.id,
-      ..PostForm::default()
-    };
+    let inserted_community = Community::create(conn, &new_community).unwrap();
 
-    let inserted_post = Post::create(&conn, &new_post).unwrap();
+    let new_post = PostInsertForm::builder()
+      .name("A test post".into())
+      .creator_id(inserted_person.id)
+      .community_id(inserted_community.id)
+      .build();
 
-    let comment_form = CommentForm {
-      content: "A test comment".into(),
-      creator_id: inserted_person.id,
-      post_id: inserted_post.id,
-      ..CommentForm::default()
-    };
+    let inserted_post = Post::create(conn, &new_post).unwrap();
 
-    let inserted_comment = Comment::create(&conn, &comment_form, None).unwrap();
+    let comment_form = CommentInsertForm::builder()
+      .content("A test comment".into())
+      .creator_id(inserted_person.id)
+      .post_id(inserted_post.id)
+      .build();
 
-    let child_comment_form = CommentForm {
-      content: "A test comment".into(),
-      creator_id: inserted_person.id,
-      post_id: inserted_post.id,
-      ..CommentForm::default()
-    };
+    let inserted_comment = Comment::create(conn, &comment_form, None).unwrap();
+
+    let child_comment_form = CommentInsertForm::builder()
+      .content("A test comment".into())
+      .creator_id(inserted_person.id)
+      .post_id(inserted_post.id)
+      .build();
 
     let _inserted_child_comment =
-      Comment::create(&conn, &child_comment_form, Some(&inserted_comment.path)).unwrap();
+      Comment::create(conn, &child_comment_form, Some(&inserted_comment.path)).unwrap();
 
     let comment_like = CommentLikeForm {
       comment_id: inserted_comment.id,
@@ -93,9 +93,9 @@ mod tests {
       score: 1,
     };
 
-    CommentLike::like(&conn, &comment_like).unwrap();
+    CommentLike::like(conn, &comment_like).unwrap();
 
-    let comment_aggs_before_delete = CommentAggregates::read(&conn, inserted_comment.id).unwrap();
+    let comment_aggs_before_delete = CommentAggregates::read(conn, inserted_comment.id).unwrap();
 
     assert_eq!(1, comment_aggs_before_delete.score);
     assert_eq!(1, comment_aggs_before_delete.upvotes);
@@ -109,35 +109,37 @@ mod tests {
       score: -1,
     };
 
-    CommentLike::like(&conn, &comment_dislike).unwrap();
+    CommentLike::like(conn, &comment_dislike).unwrap();
 
-    let comment_aggs_after_dislike = CommentAggregates::read(&conn, inserted_comment.id).unwrap();
+    let comment_aggs_after_dislike = CommentAggregates::read(conn, inserted_comment.id).unwrap();
 
     assert_eq!(0, comment_aggs_after_dislike.score);
     assert_eq!(1, comment_aggs_after_dislike.upvotes);
     assert_eq!(1, comment_aggs_after_dislike.downvotes);
 
     // Remove the first comment like
-    CommentLike::remove(&conn, inserted_person.id, inserted_comment.id).unwrap();
-    let after_like_remove = CommentAggregates::read(&conn, inserted_comment.id).unwrap();
+    CommentLike::remove(conn, inserted_person.id, inserted_comment.id).unwrap();
+    let after_like_remove = CommentAggregates::read(conn, inserted_comment.id).unwrap();
     assert_eq!(-1, after_like_remove.score);
     assert_eq!(0, after_like_remove.upvotes);
     assert_eq!(1, after_like_remove.downvotes);
 
     // Remove the parent post
-    Post::delete(&conn, inserted_post.id).unwrap();
+    Post::delete(conn, inserted_post.id).unwrap();
 
     // Should be none found, since the post was deleted
-    let after_delete = CommentAggregates::read(&conn, inserted_comment.id);
+    let after_delete = CommentAggregates::read(conn, inserted_comment.id);
     assert!(after_delete.is_err());
 
     // This should delete all the associated rows, and fire triggers
-    Person::delete(&conn, another_inserted_person.id).unwrap();
-    let person_num_deleted = Person::delete(&conn, inserted_person.id).unwrap();
+    Person::delete(conn, another_inserted_person.id).unwrap();
+    let person_num_deleted = Person::delete(conn, inserted_person.id).unwrap();
     assert_eq!(1, person_num_deleted);
 
     // Delete the community
-    let community_num_deleted = Community::delete(&conn, inserted_community.id).unwrap();
+    let community_num_deleted = Community::delete(conn, inserted_community.id).unwrap();
     assert_eq!(1, community_num_deleted);
+
+    Instance::delete(conn, inserted_instance.id).unwrap();
   }
 }

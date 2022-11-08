@@ -1,4 +1,4 @@
-use crate::Perform;
+use crate::{check_report_reason, Perform};
 use activitypub_federation::core::object_id::ObjectId;
 use actix_web::web::Data;
 use lemmy_api_common::{
@@ -7,7 +7,10 @@ use lemmy_api_common::{
 };
 use lemmy_apub::protocol::activities::community::report::Report;
 use lemmy_db_schema::{
-  source::comment_report::{CommentReport, CommentReportForm},
+  source::{
+    comment_report::{CommentReport, CommentReportForm},
+    local_site::LocalSite,
+  },
   traits::Reportable,
 };
 use lemmy_db_views::structs::{CommentReportView, CommentView};
@@ -28,15 +31,10 @@ impl Perform for CreateCommentReport {
     let data: &CreateCommentReport = self;
     let local_user_view =
       get_local_user_view_from_jwt(&data.auth, context.pool(), context.secret()).await?;
+    let local_site = blocking(context.pool(), LocalSite::read).await??;
 
-    // check size of report and check for whitespace
-    let reason = data.reason.trim();
-    if reason.is_empty() {
-      return Err(LemmyError::from_message("report_reason_required"));
-    }
-    if reason.chars().count() > 1000 {
-      return Err(LemmyError::from_message("report_too_long"));
-    }
+    let reason = self.reason.trim();
+    check_report_reason(reason, &local_site)?;
 
     let person_id = local_user_view.person.id;
     let comment_id = data.comment_id;
@@ -51,7 +49,7 @@ impl Perform for CreateCommentReport {
       creator_id: person_id,
       comment_id,
       original_comment_text: comment_view.comment.content,
-      reason: data.reason.to_owned(),
+      reason: reason.to_owned(),
     };
 
     let report = blocking(context.pool(), move |conn| {

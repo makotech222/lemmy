@@ -1,6 +1,6 @@
 use crate::{
   objects::instance::ApubSite,
-  protocol::{ImageObject, Source},
+  protocol::{objects::LanguageTag, ImageObject, Source},
 };
 use activitypub_federation::{
   core::{object_id::ObjectId, signatures::PublicKey},
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use url::Url;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum InstanceType {
   Application,
   Service,
@@ -42,6 +42,8 @@ pub struct Instance {
   pub(crate) icon: Option<ImageObject>,
   /// instance banner
   pub(crate) image: Option<ImageObject>,
+  #[serde(default)]
+  pub(crate) language: Vec<LanguageTag>,
   pub(crate) published: DateTime<FixedOffset>,
   pub(crate) updated: Option<DateTime<FixedOffset>>,
 }

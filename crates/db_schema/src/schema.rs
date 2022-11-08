@@ -27,6 +27,7 @@ table! {
         local -> Bool,
         path -> Ltree,
         distinguished -> Bool,
+        language_id -> Int4,
     }
 }
 
@@ -99,6 +100,7 @@ table! {
         shared_inbox_url -> Nullable<Varchar>,
         hidden -> Bool,
         posting_restricted_to_mods -> Bool,
+        instance_id -> Int4,
     }
 }
 
@@ -312,6 +314,7 @@ table! {
         admin -> Bool,
         bot_account -> Bool,
         ban_expires -> Nullable<Timestamp>,
+        instance_id -> Int4,
     }
 }
 
@@ -376,6 +379,16 @@ table! {
         ap_id -> Varchar,
         local -> Bool,
         language_id -> Int4,
+    }
+}
+
+table! {
+    person_post_aggregates (id) {
+        id -> Int4,
+        person_id -> Int4,
+        post_id -> Int4,
+        read_comments -> Int8,
+        published -> Timestamp,
     }
 }
 
@@ -454,32 +467,35 @@ table! {
 }
 
 table! {
+    private_message_report (id) {
+        id -> Int4,
+        creator_id -> Int4,
+        private_message_id -> Int4,
+        original_pm_text -> Text,
+        reason -> Text,
+        resolved -> Bool,
+        resolver_id -> Nullable<Int4>,
+        published -> Timestamp,
+        updated -> Nullable<Timestamp>,
+    }
+}
+
+table! {
     site (id) {
         id -> Int4,
         name -> Varchar,
         sidebar -> Nullable<Text>,
         published -> Timestamp,
         updated -> Nullable<Timestamp>,
-        enable_downvotes -> Bool,
-        open_registration -> Bool,
-        enable_nsfw -> Bool,
         icon -> Nullable<Varchar>,
         banner -> Nullable<Varchar>,
         description -> Nullable<Text>,
-        community_creation_admin_only -> Bool,
-        require_email_verification -> Bool,
-        require_application -> Bool,
-        application_question -> Nullable<Text>,
-        private_instance -> Bool,
         actor_id -> Text,
         last_refreshed_at -> Timestamp,
         inbox_url -> Text,
         private_key -> Nullable<Text>,
         public_key -> Text,
-        default_theme -> Text,
-        default_post_listing_type -> Text,
-        legal_information -> Nullable<Text>,
-        hide_modlog_mod_names -> Bool,
+        instance_id -> Int4,
     }
 }
 
@@ -520,59 +536,6 @@ table! {
     tagline (id) {
         id -> Int4,
         content -> Varchar,
-    }
-}
-
-// These are necessary since diesel doesn't have self joins / aliases
-table! {
-    person_alias_1 (id) {
-        id -> Int4,
-        name -> Varchar,
-        display_name -> Nullable<Varchar>,
-        avatar -> Nullable<Varchar>,
-        banned -> Bool,
-        published -> Timestamp,
-        updated -> Nullable<Timestamp>,
-        actor_id -> Varchar,
-        bio -> Nullable<Text>,
-        local -> Bool,
-        private_key -> Nullable<Text>,
-        public_key -> Text,
-        last_refreshed_at -> Timestamp,
-        banner -> Nullable<Varchar>,
-        deleted -> Bool,
-        inbox_url -> Varchar,
-        shared_inbox_url -> Nullable<Varchar>,
-        matrix_user_id -> Nullable<Text>,
-        admin -> Bool,
-        bot_account -> Bool,
-        ban_expires -> Nullable<Timestamp>,
-    }
-}
-
-table! {
-    person_alias_2 (id) {
-        id -> Int4,
-        name -> Varchar,
-        display_name -> Nullable<Varchar>,
-        avatar -> Nullable<Varchar>,
-        banned -> Bool,
-        published -> Timestamp,
-        updated -> Nullable<Timestamp>,
-        actor_id -> Varchar,
-        bio -> Nullable<Text>,
-        local -> Bool,
-        private_key -> Nullable<Text>,
-        public_key -> Text,
-        last_refreshed_at -> Timestamp,
-        banner -> Nullable<Varchar>,
-        deleted -> Bool,
-        inbox_url -> Varchar,
-        shared_inbox_url -> Nullable<Varchar>,
-        matrix_user_id -> Nullable<Text>,
-        admin -> Bool,
-        bot_account -> Bool,
-        ban_expires -> Nullable<Timestamp>,
     }
 }
 
@@ -669,16 +632,103 @@ table! {
     }
 }
 
-joinable!(person_mention -> person_alias_1 (recipient_id));
-joinable!(comment_reply -> person_alias_1 (recipient_id));
-joinable!(post -> person_alias_1 (creator_id));
-joinable!(comment -> person_alias_1 (creator_id));
+table! {
+    site_language(id) {
+        id -> Int4,
+        site_id -> Int4,
+        language_id -> Int4,
+    }
+}
 
-joinable!(post_report -> person_alias_2 (resolver_id));
-joinable!(comment_report -> person_alias_2 (resolver_id));
+table! {
+    community_language(id) {
+        id -> Int4,
+        community_id -> Int4,
+        language_id -> Int4,
+    }
+}
+
+table! {
+  instance(id) {
+    id -> Int4,
+    domain -> Text,
+    published -> Timestamp,
+    updated -> Nullable<Timestamp>,
+  }
+}
+
+table! {
+  federation_allowlist(id) {
+    id -> Int4,
+    instance_id -> Int4,
+    published -> Timestamp,
+    updated -> Nullable<Timestamp>,
+  }
+}
+
+table! {
+  federation_blocklist(id) {
+    id -> Int4,
+    instance_id -> Int4,
+    published -> Timestamp,
+    updated -> Nullable<Timestamp>,
+  }
+}
+
+table! {
+  local_site(id) {
+    id -> Int4,
+    site_id -> Int4,
+    site_setup -> Bool,
+    enable_downvotes -> Bool,
+    open_registration -> Bool,
+    enable_nsfw -> Bool,
+    community_creation_admin_only -> Bool,
+    require_email_verification -> Bool,
+    require_application -> Bool,
+    application_question -> Nullable<Text>,
+    private_instance -> Bool,
+    default_theme -> Text,
+    default_post_listing_type -> Text,
+    legal_information -> Nullable<Text>,
+    hide_modlog_mod_names -> Bool,
+    application_email_admins -> Bool,
+    slur_filter_regex -> Nullable<Text>,
+    actor_name_max_length -> Int4,
+    federation_enabled -> Bool,
+    federation_debug -> Bool,
+    federation_strict_allowlist -> Bool,
+    federation_http_fetch_retry_limit -> Int4,
+    federation_worker_count -> Int4,
+    captcha_enabled -> Bool,
+    captcha_difficulty -> Text,
+    published -> Timestamp,
+    updated -> Nullable<Timestamp>,
+  }
+}
+
+table! {
+  local_site_rate_limit(id) {
+    id -> Int4,
+    local_site_id -> Int4,
+    message -> Int4,
+    message_per_second-> Int4,
+    post -> Int4,
+    post_per_second -> Int4,
+    register -> Int4,
+    register_per_second -> Int4,
+    image -> Int4,
+    image_per_second -> Int4,
+    comment -> Int4,
+    comment_per_second -> Int4,
+    search -> Int4,
+    search_per_second -> Int4,
+    published -> Timestamp,
+    updated -> Nullable<Timestamp>,
+  }
+}
 
 joinable!(person_block -> person (person_id));
-joinable!(person_block -> person_alias_1 (target_id));
 
 joinable!(comment -> person (creator_id));
 joinable!(comment -> post (post_id));
@@ -721,6 +771,8 @@ joinable!(comment_reply -> comment (comment_id));
 joinable!(comment_reply -> person (recipient_id));
 joinable!(post -> community (community_id));
 joinable!(post -> person (creator_id));
+joinable!(person_post_aggregates -> post (post_id));
+joinable!(person_post_aggregates -> person (person_id));
 joinable!(post_aggregates -> post (post_id));
 joinable!(post_like -> person (person_id));
 joinable!(post_like -> post (post_id));
@@ -736,8 +788,14 @@ joinable!(registration_application -> person (admin_id));
 joinable!(mod_hide_community -> person (mod_person_id));
 joinable!(mod_hide_community -> community (community_id));
 joinable!(post -> language (language_id));
+joinable!(comment -> language (language_id));
 joinable!(local_user_language -> language (language_id));
 joinable!(local_user_language -> local_user (local_user_id));
+joinable!(private_message_report -> private_message (private_message_id));
+joinable!(site_language -> language (language_id));
+joinable!(site_language -> site (site_id));
+joinable!(community_language -> language (language_id));
+joinable!(community_language -> community (community_id));
 
 joinable!(admin_purge_comment -> person (admin_person_id));
 joinable!(admin_purge_comment -> post (post_id));
@@ -745,6 +803,14 @@ joinable!(admin_purge_community -> person (admin_person_id));
 joinable!(admin_purge_person -> person (admin_person_id));
 joinable!(admin_purge_post -> community (community_id));
 joinable!(admin_purge_post -> person (admin_person_id));
+
+joinable!(site -> instance (instance_id));
+joinable!(person -> instance (instance_id));
+joinable!(community -> instance (instance_id));
+joinable!(federation_allowlist -> instance (instance_id));
+joinable!(federation_blocklist -> instance (instance_id));
+joinable!(local_site -> site (site_id));
+joinable!(local_site_rate_limit -> local_site (local_site_id));
 
 allow_tables_to_appear_in_same_query!(
   activity,
@@ -777,6 +843,7 @@ allow_tables_to_appear_in_same_query!(
   person_ban,
   person_block,
   person_mention,
+  person_post_aggregates,
   comment_reply,
   post,
   post_aggregates,
@@ -785,10 +852,9 @@ allow_tables_to_appear_in_same_query!(
   post_report,
   post_saved,
   private_message,
+  private_message_report,
   site,
   site_aggregates,
-  person_alias_1,
-  person_alias_2,
   admin_purge_comment,
   admin_purge_community,
   admin_purge_person,
@@ -796,5 +862,12 @@ allow_tables_to_appear_in_same_query!(
   email_verification,
   registration_application,
   language,
-  local_user_language
+  local_user_language,
+  site_language,
+  community_language,
+  instance,
+  federation_allowlist,
+  federation_blocklist,
+  local_site,
+  local_site_rate_limit,
 );

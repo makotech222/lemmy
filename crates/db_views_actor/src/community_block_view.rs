@@ -13,7 +13,7 @@ use lemmy_db_schema::{
 type CommunityBlockViewTuple = (PersonSafe, CommunitySafe);
 
 impl CommunityBlockView {
-  pub fn for_person(conn: &PgConnection, person_id: PersonId) -> Result<Vec<Self>, Error> {
+  pub fn for_person(conn: &mut PgConnection, person_id: PersonId) -> Result<Vec<Self>, Error> {
     let res = community_block::table
       .inner_join(person::table)
       .inner_join(community::table)
@@ -22,6 +22,8 @@ impl CommunityBlockView {
         Community::safe_columns_tuple(),
       ))
       .filter(community_block::person_id.eq(person_id))
+      .filter(community::deleted.eq(false))
+      .filter(community::removed.eq(false))
       .order_by(community_block::published)
       .load::<CommunityBlockViewTuple>(conn)?;
 

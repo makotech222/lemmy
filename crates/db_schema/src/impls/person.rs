@@ -1,7 +1,7 @@
 use crate::{
   newtypes::{DbUrl, PersonId},
   schema::person::dsl::*,
-  source::person::{Person, PersonForm},
+  source::person::{Person, PersonInsertForm, PersonUpdateForm},
   traits::{ApubActor, Crud},
   utils::{functions::lower, naive_now},
 };
@@ -37,6 +37,7 @@ mod safe_type {
     admin,
     bot_account,
     ban_expires,
+    instance_id,
   );
 
   impl ToSafe for Person {
@@ -61,129 +62,38 @@ mod safe_type {
         admin,
         bot_account,
         ban_expires,
-      )
-    }
-  }
-}
-
-mod safe_type_alias_1 {
-  use crate::{schema::person_alias_1::columns::*, source::person::PersonAlias1, traits::ToSafe};
-
-  type Columns = (
-    id,
-    name,
-    display_name,
-    avatar,
-    banned,
-    published,
-    updated,
-    actor_id,
-    bio,
-    local,
-    banner,
-    deleted,
-    inbox_url,
-    shared_inbox_url,
-    matrix_user_id,
-    admin,
-    bot_account,
-    ban_expires,
-  );
-
-  impl ToSafe for PersonAlias1 {
-    type SafeColumns = Columns;
-    fn safe_columns_tuple() -> Self::SafeColumns {
-      (
-        id,
-        name,
-        display_name,
-        avatar,
-        banned,
-        published,
-        updated,
-        actor_id,
-        bio,
-        local,
-        banner,
-        deleted,
-        inbox_url,
-        shared_inbox_url,
-        matrix_user_id,
-        admin,
-        bot_account,
-        ban_expires,
-      )
-    }
-  }
-}
-
-mod safe_type_alias_2 {
-  use crate::{schema::person_alias_2::columns::*, source::person::PersonAlias2, traits::ToSafe};
-
-  type Columns = (
-    id,
-    name,
-    display_name,
-    avatar,
-    banned,
-    published,
-    updated,
-    actor_id,
-    bio,
-    local,
-    banner,
-    deleted,
-    inbox_url,
-    shared_inbox_url,
-    matrix_user_id,
-    admin,
-    bot_account,
-    ban_expires,
-  );
-
-  impl ToSafe for PersonAlias2 {
-    type SafeColumns = Columns;
-    fn safe_columns_tuple() -> Self::SafeColumns {
-      (
-        id,
-        name,
-        display_name,
-        avatar,
-        banned,
-        published,
-        updated,
-        actor_id,
-        bio,
-        local,
-        banner,
-        deleted,
-        inbox_url,
-        shared_inbox_url,
-        matrix_user_id,
-        admin,
-        bot_account,
-        ban_expires,
+        instance_id,
       )
     }
   }
 }
 
 impl Crud for Person {
-  type Form = PersonForm;
+  type InsertForm = PersonInsertForm;
+  type UpdateForm = PersonUpdateForm;
   type IdType = PersonId;
-  fn read(conn: &PgConnection, person_id: PersonId) -> Result<Self, Error> {
+  fn read(conn: &mut PgConnection, person_id: PersonId) -> Result<Self, Error> {
     person
       .filter(deleted.eq(false))
       .find(person_id)
       .first::<Self>(conn)
   }
-  fn delete(conn: &PgConnection, person_id: PersonId) -> Result<usize, Error> {
+  fn delete(conn: &mut PgConnection, person_id: PersonId) -> Result<usize, Error> {
     diesel::delete(person.find(person_id)).execute(conn)
   }
-  fn create(conn: &PgConnection, form: &PersonForm) -> Result<Self, Error> {
-    insert_into(person).values(form).get_result::<Self>(conn)
+  fn create(conn: &mut PgConnection, form: &PersonInsertForm) -> Result<Self, Error> {
+    insert_into(person)
+      .values(form)
+      .on_conflict(actor_id)
+      .do_update()
+      .set(form)
+      .get_result::<Self>(conn)
   }
-  fn update(conn: &PgConnection, person_id: PersonId, form: &PersonForm) -> Result<Self, Error> {
+  fn update(
+    conn: &mut PgConnection,
+    person_id: PersonId,
+    form: &PersonUpdateForm,
+  ) -> Result<Self, Error> {
     diesel::update(person.find(person_id))
       .set(form)
       .get_result::<Self>(conn)
@@ -191,30 +101,7 @@ impl Crud for Person {
 }
 
 impl Person {
-  pub fn ban_person(
-    conn: &PgConnection,
-    person_id: PersonId,
-    ban: bool,
-    expires: Option<chrono::NaiveDateTime>,
-  ) -> Result<Self, Error> {
-    diesel::update(person.find(person_id))
-      .set((banned.eq(ban), ban_expires.eq(expires)))
-      .get_result::<Self>(conn)
-  }
-
-  pub fn add_admin(conn: &PgConnection, person_id: PersonId, added: bool) -> Result<Self, Error> {
-    diesel::update(person.find(person_id))
-      .set(admin.eq(added))
-      .get_result::<Self>(conn)
-  }
-
-  pub fn mark_as_updated(conn: &PgConnection, person_id: PersonId) -> Result<Person, Error> {
-    diesel::update(person.find(person_id))
-      .set((last_refreshed_at.eq(naive_now()),))
-      .get_result::<Self>(conn)
-  }
-
-  pub fn delete_account(conn: &PgConnection, person_id: PersonId) -> Result<Person, Error> {
+  pub fn delete_account(conn: &mut PgConnection, person_id: PersonId) -> Result<Person, Error> {
     use crate::schema::local_user;
 
     // Set the local user info to none
@@ -237,41 +124,6 @@ impl Person {
       ))
       .get_result::<Self>(conn)
   }
-
-  pub fn upsert(conn: &PgConnection, person_form: &PersonForm) -> Result<Person, Error> {
-    insert_into(person)
-      .values(person_form)
-      .on_conflict(actor_id)
-      .do_update()
-      .set(person_form)
-      .get_result::<Self>(conn)
-  }
-
-  pub fn update_deleted(
-    conn: &PgConnection,
-    person_id: PersonId,
-    new_deleted: bool,
-  ) -> Result<Person, Error> {
-    use crate::schema::person::dsl::*;
-    diesel::update(person.find(person_id))
-      .set(deleted.eq(new_deleted))
-      .get_result::<Self>(conn)
-  }
-
-  pub fn leave_admin(conn: &PgConnection, person_id: PersonId) -> Result<Self, Error> {
-    diesel::update(person.find(person_id))
-      .set(admin.eq(false))
-      .get_result::<Self>(conn)
-  }
-
-  pub fn remove_avatar_and_banner(conn: &PgConnection, person_id: PersonId) -> Result<Self, Error> {
-    diesel::update(person.find(person_id))
-      .set((
-        avatar.eq::<Option<String>>(None),
-        banner.eq::<Option<String>>(None),
-      ))
-      .get_result::<Self>(conn)
-  }
 }
 
 pub fn is_banned(banned_: bool, expires: Option<chrono::NaiveDateTime>) -> bool {
@@ -283,7 +135,7 @@ pub fn is_banned(banned_: bool, expires: Option<chrono::NaiveDateTime>) -> bool 
 }
 
 impl ApubActor for Person {
-  fn read_from_apub_id(conn: &PgConnection, object_id: &DbUrl) -> Result<Option<Self>, Error> {
+  fn read_from_apub_id(conn: &mut PgConnection, object_id: &DbUrl) -> Result<Option<Self>, Error> {
     use crate::schema::person::dsl::*;
     Ok(
       person
@@ -296,7 +148,7 @@ impl ApubActor for Person {
   }
 
   fn read_from_name(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     from_name: &str,
     include_deleted: bool,
   ) -> Result<Person, Error> {
@@ -311,7 +163,7 @@ impl ApubActor for Person {
   }
 
   fn read_from_name_and_domain(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     person_name: &str,
     protocol_domain: &str,
   ) -> Result<Person, Error> {
@@ -325,19 +177,27 @@ impl ApubActor for Person {
 
 #[cfg(test)]
 mod tests {
-  use crate::{source::person::*, traits::Crud, utils::establish_unpooled_connection};
+  use crate::{
+    source::{instance::Instance, person::*},
+    traits::Crud,
+    utils::establish_unpooled_connection,
+  };
+  use serial_test::serial;
 
   #[test]
+  #[serial]
   fn test_crud() {
-    let conn = establish_unpooled_connection();
+    let conn = &mut establish_unpooled_connection();
 
-    let new_person = PersonForm {
-      name: "holly".into(),
-      public_key: Some("nada".to_owned()),
-      ..PersonForm::default()
-    };
+    let inserted_instance = Instance::create(conn, "my_domain.tld").unwrap();
 
-    let inserted_person = Person::create(&conn, &new_person).unwrap();
+    let new_person = PersonInsertForm::builder()
+      .name("holly".into())
+      .public_key("nada".to_owned())
+      .instance_id(inserted_instance.id)
+      .build();
+
+    let inserted_person = Person::create(conn, &new_person).unwrap();
 
     let expected_person = Person {
       id: inserted_person.id,
@@ -361,11 +221,18 @@ mod tests {
       shared_inbox_url: None,
       matrix_user_id: None,
       ban_expires: None,
+      instance_id: inserted_instance.id,
     };
 
-    let read_person = Person::read(&conn, inserted_person.id).unwrap();
-    let updated_person = Person::update(&conn, inserted_person.id, &new_person).unwrap();
-    let num_deleted = Person::delete(&conn, inserted_person.id).unwrap();
+    let read_person = Person::read(conn, inserted_person.id).unwrap();
+
+    let update_person_form = PersonUpdateForm::builder()
+      .actor_id(Some(inserted_person.actor_id.to_owned()))
+      .build();
+    let updated_person = Person::update(conn, inserted_person.id, &update_person_form).unwrap();
+
+    let num_deleted = Person::delete(conn, inserted_person.id).unwrap();
+    Instance::delete(conn, inserted_instance.id).unwrap();
 
     assert_eq!(expected_person, read_person);
     assert_eq!(expected_person, inserted_person);

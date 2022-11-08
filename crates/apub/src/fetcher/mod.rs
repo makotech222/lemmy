@@ -18,6 +18,7 @@ pub mod webfinger;
 pub async fn resolve_actor_identifier<Actor, DbActor>(
   identifier: &str,
   context: &LemmyContext,
+  include_deleted: bool,
 ) -> Result<DbActor, LemmyError>
 where
   Actor: ApubObject<DataType = LemmyContext, Error = LemmyError>
@@ -44,7 +45,7 @@ where
       Ok(actor?)
     } else {
       // Fetch the actor from its home instance using webfinger
-      let id = webfinger_resolve_actor::<Actor>(identifier, context, &mut 0).await?;
+      let id = webfinger_resolve_actor::<Actor>(identifier, true, context, &mut 0).await?;
       let actor: DbActor = blocking(context.pool(), move |conn| {
         DbActor::read_from_apub_id(conn, &id)
       })
@@ -58,7 +59,7 @@ where
     let identifier = identifier.to_string();
     Ok(
       blocking(context.pool(), move |conn| {
-        DbActor::read_from_name(conn, &identifier, false)
+        DbActor::read_from_name(conn, &identifier, include_deleted)
       })
       .await??,
     )

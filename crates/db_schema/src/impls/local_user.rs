@@ -1,7 +1,10 @@
 use crate::{
   newtypes::LocalUserId,
   schema::local_user::dsl::*,
-  source::local_user::{LocalUser, LocalUserForm},
+  source::{
+    actor_language::{LocalUserLanguage, SiteLanguage},
+    local_user::{LocalUser, LocalUserInsertForm, LocalUserUpdateForm},
+  },
   traits::Crud,
   utils::naive_now,
 };
@@ -64,19 +67,8 @@ mod safe_settings_type {
 }
 
 impl LocalUser {
-  pub fn register(conn: &PgConnection, form: &LocalUserForm) -> Result<Self, Error> {
-    let mut edited_user = form.clone();
-    let password_hash = form
-      .password_encrypted
-      .as_ref()
-      .map(|p| hash(p, DEFAULT_COST).expect("Couldn't hash password"));
-    edited_user.password_encrypted = password_hash;
-
-    Self::create(conn, &edited_user)
-  }
-
   pub fn update_password(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     local_user_id: LocalUserId,
     new_password: &str,
   ) -> Result<Self, Error> {
@@ -90,14 +82,14 @@ impl LocalUser {
       .get_result::<Self>(conn)
   }
 
-  pub fn set_all_users_email_verified(conn: &PgConnection) -> Result<Vec<Self>, Error> {
+  pub fn set_all_users_email_verified(conn: &mut PgConnection) -> Result<Vec<Self>, Error> {
     diesel::update(local_user)
       .set(email_verified.eq(true))
       .get_results::<Self>(conn)
   }
 
   pub fn set_all_users_registration_applications_accepted(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
   ) -> Result<Vec<Self>, Error> {
     diesel::update(local_user)
       .set(accepted_application.eq(true))
@@ -106,23 +98,41 @@ impl LocalUser {
 }
 
 impl Crud for LocalUser {
-  type Form = LocalUserForm;
+  type InsertForm = LocalUserInsertForm;
+  type UpdateForm = LocalUserUpdateForm;
   type IdType = LocalUserId;
-  fn read(conn: &PgConnection, local_user_id: LocalUserId) -> Result<Self, Error> {
+  fn read(conn: &mut PgConnection, local_user_id: LocalUserId) -> Result<Self, Error> {
     local_user.find(local_user_id).first::<Self>(conn)
   }
-  fn delete(conn: &PgConnection, local_user_id: LocalUserId) -> Result<usize, Error> {
+  fn delete(conn: &mut PgConnection, local_user_id: LocalUserId) -> Result<usize, Error> {
     diesel::delete(local_user.find(local_user_id)).execute(conn)
   }
-  fn create(conn: &PgConnection, form: &LocalUserForm) -> Result<Self, Error> {
-    insert_into(local_user)
-      .values(form)
-      .get_result::<Self>(conn)
+  fn create(conn: &mut PgConnection, form: &Self::InsertForm) -> Result<Self, Error> {
+    let mut form_with_encrypted_password = form.clone();
+    let password_hash =
+      hash(&form.password_encrypted, DEFAULT_COST).expect("Couldn't hash password");
+    form_with_encrypted_password.password_encrypted = password_hash;
+
+    let local_user_ = insert_into(local_user)
+      .values(form_with_encrypted_password)
+      .get_result::<Self>(conn)?;
+
+    let site_languages = SiteLanguage::read_local(conn);
+    if let Ok(langs) = site_languages {
+      // if site exists, init user with site languages
+      LocalUserLanguage::update(conn, langs, local_user_.id)?;
+    } else {
+      // otherwise, init with all languages (this only happens during tests and
+      // for first admin user, which is created before site)
+      LocalUserLanguage::update(conn, vec![], local_user_.id)?;
+    }
+
+    Ok(local_user_)
   }
   fn update(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     local_user_id: LocalUserId,
-    form: &LocalUserForm,
+    form: &Self::UpdateForm,
   ) -> Result<Self, Error> {
     diesel::update(local_user.find(local_user_id))
       .set(form)

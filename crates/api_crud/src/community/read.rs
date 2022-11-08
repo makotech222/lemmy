@@ -9,7 +9,13 @@ use lemmy_apub::{
   objects::{community::ApubCommunity, instance::instance_actor_id_from_url},
 };
 use lemmy_db_schema::{
-  source::{community::Community, site::Site},
+  impls::actor_language::default_post_language,
+  source::{
+    actor_language::CommunityLanguage,
+    community::Community,
+    local_site::LocalSite,
+    site::Site,
+  },
   traits::DeleteableOrRemoveable,
 };
 use lemmy_db_views_actor::structs::{CommunityModeratorView, CommunityView};
@@ -30,20 +36,21 @@ impl PerformCrud for GetCommunity {
     let local_user_view =
       get_local_user_view_from_jwt_opt(data.auth.as_ref(), context.pool(), context.secret())
         .await?;
+    let local_site = blocking(context.pool(), LocalSite::read).await??;
 
     if data.name.is_none() && data.id.is_none() {
       return Err(LemmyError::from_message("no_id_given"));
     }
 
-    check_private_instance(&local_user_view, context.pool()).await?;
+    check_private_instance(&local_user_view, &local_site)?;
 
-    let person_id = local_user_view.map(|u| u.person.id);
+    let person_id = local_user_view.as_ref().map(|u| u.person.id);
 
     let community_id = match data.id {
       Some(id) => id,
       None => {
         let name = data.name.to_owned().unwrap_or_else(|| "main".to_string());
-        resolve_actor_identifier::<ApubCommunity, Community>(&name, context)
+        resolve_actor_identifier::<ApubCommunity, Community>(&name, context, true)
           .await
           .map_err(|e| e.with_message("couldnt_find_community"))?
           .id
@@ -87,11 +94,27 @@ impl PerformCrud for GetCommunity {
       }
     }
 
+    let community_id = community_view.community.id;
+    let discussion_languages = blocking(context.pool(), move |conn| {
+      CommunityLanguage::read(conn, community_id)
+    })
+    .await??;
+    let default_post_language = if let Some(user) = local_user_view {
+      blocking(context.pool(), move |conn| {
+        default_post_language(conn, community_id, user.local_user.id)
+      })
+      .await??
+    } else {
+      None
+    };
+
     let res = GetCommunityResponse {
       community_view,
       site,
       moderators,
       online,
+      discussion_languages,
+      default_post_language,
     };
 
     // Return the jwt

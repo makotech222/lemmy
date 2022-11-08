@@ -1,6 +1,6 @@
 use crate::sensitive::Sensitive;
 use lemmy_db_schema::{
-  newtypes::{CommentId, CommunityId, PersonId, PostId},
+  newtypes::{CommentId, CommunityId, LanguageId, PersonId, PostId},
   source::{language::Language, tagline::Tagline},
   ListingType,
   ModlogActionType,
@@ -125,8 +125,33 @@ pub struct CreateSite {
   pub private_instance: Option<bool>,
   pub default_theme: Option<String>,
   pub default_post_listing_type: Option<String>,
+  pub application_email_admins: Option<bool>,
   pub auth: Sensitive<String>,
   pub hide_modlog_mod_names: Option<bool>,
+  pub legal_information: Option<String>,
+  pub slur_filter_regex: Option<String>,
+  pub actor_name_max_length: Option<i32>,
+  pub rate_limit_message: Option<i32>,
+  pub rate_limit_message_per_second: Option<i32>,
+  pub rate_limit_post: Option<i32>,
+  pub rate_limit_post_per_second: Option<i32>,
+  pub rate_limit_register: Option<i32>,
+  pub rate_limit_register_per_second: Option<i32>,
+  pub rate_limit_image: Option<i32>,
+  pub rate_limit_image_per_second: Option<i32>,
+  pub rate_limit_comment: Option<i32>,
+  pub rate_limit_comment_per_second: Option<i32>,
+  pub rate_limit_search: Option<i32>,
+  pub rate_limit_search_per_second: Option<i32>,
+  pub federation_enabled: Option<bool>,
+  pub federation_debug: Option<bool>,
+  pub federation_strict_allowlist: Option<bool>,
+  pub federation_http_fetch_retry_limit: Option<i32>,
+  pub federation_worker_count: Option<i32>,
+  pub captcha_enabled: Option<bool>,
+  pub captcha_difficulty: Option<String>,
+  pub allowed_instances: Option<Vec<String>>,
+  pub blocked_instances: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -147,8 +172,33 @@ pub struct EditSite {
   pub default_theme: Option<String>,
   pub default_post_listing_type: Option<String>,
   pub legal_information: Option<String>,
-  pub auth: Sensitive<String>,
+  pub application_email_admins: Option<bool>,
   pub hide_modlog_mod_names: Option<bool>,
+  pub discussion_languages: Option<Vec<LanguageId>>,
+  pub slur_filter_regex: Option<String>,
+  pub actor_name_max_length: Option<i32>,
+  pub rate_limit_message: Option<i32>,
+  pub rate_limit_message_per_second: Option<i32>,
+  pub rate_limit_post: Option<i32>,
+  pub rate_limit_post_per_second: Option<i32>,
+  pub rate_limit_register: Option<i32>,
+  pub rate_limit_register_per_second: Option<i32>,
+  pub rate_limit_image: Option<i32>,
+  pub rate_limit_image_per_second: Option<i32>,
+  pub rate_limit_comment: Option<i32>,
+  pub rate_limit_comment_per_second: Option<i32>,
+  pub rate_limit_search: Option<i32>,
+  pub rate_limit_search_per_second: Option<i32>,
+  pub federation_enabled: Option<bool>,
+  pub federation_debug: Option<bool>,
+  pub federation_strict_allowlist: Option<bool>,
+  pub federation_http_fetch_retry_limit: Option<i32>,
+  pub federation_worker_count: Option<i32>,
+  pub captcha_enabled: Option<bool>,
+  pub captcha_difficulty: Option<String>,
+  pub allowed_instances: Option<Vec<String>>,
+  pub blocked_instances: Option<Vec<String>>,
+  pub auth: Sensitive<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -163,13 +213,14 @@ pub struct SiteResponse {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GetSiteResponse {
-  pub site_view: Option<SiteView>, // Because the site might not be set up yet
+  pub site_view: SiteView,
   pub admins: Vec<PersonViewSafe>,
   pub online: usize,
   pub version: String,
   pub my_user: Option<MyUserInfo>,
   pub federated_instances: Option<FederatedInstances>, // Federation may be disabled
   pub all_languages: Vec<Language>,
+  pub discussion_languages: Vec<LanguageId>,
   pub tagline: Option<String>,
 }
 

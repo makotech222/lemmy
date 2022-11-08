@@ -9,6 +9,7 @@ use lemmy_api_common::{
     check_community_deleted_or_removed,
     get_local_user_view_from_jwt,
     honeypot_check,
+    local_site_to_slur_regex,
     mark_post_as_read,
   },
 };
@@ -19,13 +20,14 @@ use lemmy_apub::{
   EndpointType,
 };
 use lemmy_db_schema::{
+  impls::actor_language::default_post_language,
   source::{
+    actor_language::CommunityLanguage,
     community::Community,
-    language::Language,
-    post::{Post, PostForm, PostLike, PostLikeForm},
+    local_site::LocalSite,
+    post::{Post, PostInsertForm, PostLike, PostLikeForm, PostUpdateForm},
   },
   traits::{Crud, Likeable},
-  utils::diesel_option_overwrite,
 };
 use lemmy_db_views_actor::structs::CommunityView;
 use lemmy_utils::{
@@ -51,15 +53,15 @@ impl PerformCrud for CreatePost {
     let data: &CreatePost = self;
     let local_user_view =
       get_local_user_view_from_jwt(&data.auth, context.pool(), context.secret()).await?;
+    let local_site = blocking(context.pool(), LocalSite::read).await??;
 
-    let slur_regex = &context.settings().slur_regex();
-    check_slurs(&data.name, slur_regex)?;
-    check_slurs_opt(&data.body, slur_regex)?;
+    let slur_regex = local_site_to_slur_regex(&local_site);
+    check_slurs(&data.name, &slur_regex)?;
+    check_slurs_opt(&data.body, &slur_regex)?;
     honeypot_check(&data.honeypot)?;
 
     let data_url = data.url.as_ref();
-    let url = Some(data_url.map(clean_url_params).map(Into::into)); // TODO no good way to handle a "clear"
-    let body = diesel_option_overwrite(&data.body);
+    let url = data_url.map(clean_url_params).map(Into::into); // TODO no good way to handle a "clear"
 
     if !is_valid_post_title(&data.name) {
       return Err(LemmyError::from_message("invalid_post_title"));
@@ -88,32 +90,36 @@ impl PerformCrud for CreatePost {
     let (metadata_res, thumbnail_url) =
       fetch_site_data(context.client(), context.settings(), data_url).await;
     let (embed_title, embed_description, embed_video_url) = metadata_res
-      .map(|u| (Some(u.title), Some(u.description), Some(u.embed_video_url)))
+      .map(|u| (u.title, u.description, u.embed_video_url))
       .unwrap_or_default();
 
-    let language_id = Some(
-      data.language_id.unwrap_or(
+    let language_id = match data.language_id {
+      Some(lid) => Some(lid),
+      None => {
         blocking(context.pool(), move |conn| {
-          Language::read_undetermined(conn)
+          default_post_language(conn, community_id, local_user_view.local_user.id)
         })
-        .await??,
-      ),
-    );
-
-    let post_form = PostForm {
-      name: data.name.trim().to_owned(),
-      url,
-      body,
-      community_id: data.community_id,
-      creator_id: local_user_view.person.id,
-      nsfw: data.nsfw,
-      embed_title,
-      embed_description,
-      embed_video_url,
-      language_id,
-      thumbnail_url: Some(thumbnail_url),
-      ..PostForm::default()
+        .await??
+      }
     };
+    blocking(context.pool(), move |conn| {
+      CommunityLanguage::is_allowed_community_language(conn, language_id, community_id)
+    })
+    .await??;
+
+    let post_form = PostInsertForm::builder()
+      .name(data.name.trim().to_owned())
+      .url(url)
+      .body(data.body.to_owned())
+      .community_id(data.community_id)
+      .creator_id(local_user_view.person.id)
+      .nsfw(data.nsfw)
+      .embed_title(embed_title)
+      .embed_description(embed_description)
+      .embed_video_url(embed_video_url)
+      .language_id(language_id)
+      .thumbnail_url(thumbnail_url)
+      .build();
 
     let inserted_post =
       match blocking(context.pool(), move |conn| Post::create(conn, &post_form)).await? {
@@ -137,7 +143,11 @@ impl PerformCrud for CreatePost {
         &inserted_post_id.to_string(),
         &protocol_and_hostname,
       )?;
-      Ok(Post::update_ap_id(conn, inserted_post_id, apub_id)?)
+      Ok(Post::update(
+        conn,
+        inserted_post_id,
+        &PostUpdateForm::builder().ap_id(Some(apub_id)).build(),
+      )?)
     })
     .await?
     .map_err(|e| e.with_message("couldnt_create_post"))?;
@@ -151,7 +161,7 @@ impl PerformCrud for CreatePost {
       score: 1,
     };
 
-    let like = move |conn: &'_ _| PostLike::like(conn, &like_form);
+    let like = move |conn: &mut _| PostLike::like(conn, &like_form);
     blocking(context.pool(), like)
       .await?
       .map_err(|e| LemmyError::from_error_message(e, "couldnt_like_post"))?;

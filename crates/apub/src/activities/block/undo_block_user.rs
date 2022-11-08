@@ -24,7 +24,7 @@ use lemmy_db_schema::{
   source::{
     community::{CommunityPersonBan, CommunityPersonBanForm},
     moderator::{ModBan, ModBanForm, ModBanFromCommunity, ModBanFromCommunityForm},
-    person::Person,
+    person::{Person, PersonUpdateForm},
   },
   traits::{Bannable, Crud},
 };
@@ -121,7 +121,14 @@ impl ActivityHandler for UndoBlockUser {
     {
       SiteOrCommunity::Site(_site) => {
         let blocked_person = blocking(context.pool(), move |conn| {
-          Person::ban_person(conn, blocked_person.id, false, expires)
+          Person::update(
+            conn,
+            blocked_person.id,
+            &PersonUpdateForm::builder()
+              .banned(Some(false))
+              .ban_expires(Some(expires))
+              .build(),
+          )
         })
         .await??;
 
@@ -141,7 +148,7 @@ impl ActivityHandler for UndoBlockUser {
           person_id: blocked_person.id,
           expires: None,
         };
-        blocking(context.pool(), move |conn: &'_ _| {
+        blocking(context.pool(), move |conn: &mut _| {
           CommunityPersonBan::unban(conn, &community_user_ban_form)
         })
         .await??;

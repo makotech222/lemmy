@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 #[cfg(feature = "full")]
 #[macro_use]
 extern crate diesel;
@@ -48,7 +50,7 @@ pub enum CommentSortType {
   Old,
 }
 
-#[derive(EnumString, Display, Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(EnumString, Display, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum ListingType {
   All,
   Local,
@@ -65,14 +67,14 @@ pub enum SearchType {
   Url,
 }
 
-#[derive(EnumString, Display, Debug, PartialEq, Serialize, Deserialize, Clone, Copy)]
+#[derive(EnumString, Display, Debug, PartialEq, Eq, Serialize, Deserialize, Clone, Copy)]
 pub enum SubscribedType {
   Subscribed,
   NotSubscribed,
   Pending,
 }
 
-#[derive(EnumString, Display, Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[derive(EnumString, Display, Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub enum ModlogActionType {
   All,
   ModRemovePost,

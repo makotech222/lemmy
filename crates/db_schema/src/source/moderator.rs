@@ -1,6 +1,4 @@
 use crate::newtypes::{CommentId, CommunityId, PersonId, PostId};
-use serde::{Deserialize, Serialize};
-
 #[cfg(feature = "full")]
 use crate::schema::{
   admin_purge_comment,
@@ -19,10 +17,11 @@ use crate::schema::{
   mod_sticky_post,
   mod_transfer_community,
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_remove_post")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_remove_post))]
 pub struct ModRemovePost {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -33,7 +32,7 @@ pub struct ModRemovePost {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_remove_post")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_remove_post))]
 pub struct ModRemovePostForm {
   pub mod_person_id: PersonId,
   pub post_id: PostId,
@@ -41,9 +40,9 @@ pub struct ModRemovePostForm {
   pub removed: Option<bool>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_lock_post")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_lock_post))]
 pub struct ModLockPost {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -53,16 +52,16 @@ pub struct ModLockPost {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_lock_post")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_lock_post))]
 pub struct ModLockPostForm {
   pub mod_person_id: PersonId,
   pub post_id: PostId,
   pub locked: Option<bool>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_sticky_post")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_sticky_post))]
 pub struct ModStickyPost {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -72,16 +71,16 @@ pub struct ModStickyPost {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_sticky_post")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_sticky_post))]
 pub struct ModStickyPostForm {
   pub mod_person_id: PersonId,
   pub post_id: PostId,
   pub stickied: Option<bool>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_remove_comment")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_remove_comment))]
 pub struct ModRemoveComment {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -92,7 +91,7 @@ pub struct ModRemoveComment {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_remove_comment")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_remove_comment))]
 pub struct ModRemoveCommentForm {
   pub mod_person_id: PersonId,
   pub comment_id: CommentId,
@@ -100,9 +99,9 @@ pub struct ModRemoveCommentForm {
   pub removed: Option<bool>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_remove_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_remove_community))]
 pub struct ModRemoveCommunity {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -114,7 +113,7 @@ pub struct ModRemoveCommunity {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_remove_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_remove_community))]
 pub struct ModRemoveCommunityForm {
   pub mod_person_id: PersonId,
   pub community_id: CommunityId,
@@ -123,9 +122,9 @@ pub struct ModRemoveCommunityForm {
   pub expires: Option<chrono::NaiveDateTime>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_ban_from_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_ban_from_community))]
 pub struct ModBanFromCommunity {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -138,7 +137,7 @@ pub struct ModBanFromCommunity {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_ban_from_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_ban_from_community))]
 pub struct ModBanFromCommunityForm {
   pub mod_person_id: PersonId,
   pub other_person_id: PersonId,
@@ -148,9 +147,9 @@ pub struct ModBanFromCommunityForm {
   pub expires: Option<chrono::NaiveDateTime>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_ban")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_ban))]
 pub struct ModBan {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -162,16 +161,16 @@ pub struct ModBan {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_hide_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_hide_community))]
 pub struct ModHideCommunityForm {
   pub community_id: CommunityId,
   pub mod_person_id: PersonId,
   pub hidden: Option<bool>,
   pub reason: Option<String>,
 }
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_hide_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_hide_community))]
 pub struct ModHideCommunity {
   pub id: i32,
   pub community_id: CommunityId,
@@ -182,7 +181,7 @@ pub struct ModHideCommunity {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_ban")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_ban))]
 pub struct ModBanForm {
   pub mod_person_id: PersonId,
   pub other_person_id: PersonId,
@@ -191,9 +190,9 @@ pub struct ModBanForm {
   pub expires: Option<chrono::NaiveDateTime>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_add_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_add_community))]
 pub struct ModAddCommunity {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -204,7 +203,7 @@ pub struct ModAddCommunity {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_add_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_add_community))]
 pub struct ModAddCommunityForm {
   pub mod_person_id: PersonId,
   pub other_person_id: PersonId,
@@ -212,9 +211,9 @@ pub struct ModAddCommunityForm {
   pub removed: Option<bool>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_transfer_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_transfer_community))]
 pub struct ModTransferCommunity {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -225,7 +224,7 @@ pub struct ModTransferCommunity {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_transfer_community")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_transfer_community))]
 pub struct ModTransferCommunityForm {
   pub mod_person_id: PersonId,
   pub other_person_id: PersonId,
@@ -233,9 +232,9 @@ pub struct ModTransferCommunityForm {
   pub removed: Option<bool>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "mod_add")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_add))]
 pub struct ModAdd {
   pub id: i32,
   pub mod_person_id: PersonId,
@@ -245,16 +244,16 @@ pub struct ModAdd {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "mod_add")]
+#[cfg_attr(feature = "full", diesel(table_name = mod_add))]
 pub struct ModAddForm {
   pub mod_person_id: PersonId,
   pub other_person_id: PersonId,
   pub removed: Option<bool>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "admin_purge_person")]
+#[cfg_attr(feature = "full", diesel(table_name = admin_purge_person))]
 pub struct AdminPurgePerson {
   pub id: i32,
   pub admin_person_id: PersonId,
@@ -263,15 +262,15 @@ pub struct AdminPurgePerson {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "admin_purge_person")]
+#[cfg_attr(feature = "full", diesel(table_name = admin_purge_person))]
 pub struct AdminPurgePersonForm {
   pub admin_person_id: PersonId,
   pub reason: Option<String>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "admin_purge_community")]
+#[cfg_attr(feature = "full", diesel(table_name = admin_purge_community))]
 pub struct AdminPurgeCommunity {
   pub id: i32,
   pub admin_person_id: PersonId,
@@ -280,15 +279,15 @@ pub struct AdminPurgeCommunity {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "admin_purge_community")]
+#[cfg_attr(feature = "full", diesel(table_name = admin_purge_community))]
 pub struct AdminPurgeCommunityForm {
   pub admin_person_id: PersonId,
   pub reason: Option<String>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "admin_purge_post")]
+#[cfg_attr(feature = "full", diesel(table_name = admin_purge_post))]
 pub struct AdminPurgePost {
   pub id: i32,
   pub admin_person_id: PersonId,
@@ -298,16 +297,16 @@ pub struct AdminPurgePost {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "admin_purge_post")]
+#[cfg_attr(feature = "full", diesel(table_name = admin_purge_post))]
 pub struct AdminPurgePostForm {
   pub admin_person_id: PersonId,
   pub community_id: CommunityId,
   pub reason: Option<String>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "full", derive(Queryable, Identifiable))]
-#[cfg_attr(feature = "full", table_name = "admin_purge_comment")]
+#[cfg_attr(feature = "full", diesel(table_name = admin_purge_comment))]
 pub struct AdminPurgeComment {
   pub id: i32,
   pub admin_person_id: PersonId,
@@ -317,7 +316,7 @@ pub struct AdminPurgeComment {
 }
 
 #[cfg_attr(feature = "full", derive(Insertable, AsChangeset))]
-#[cfg_attr(feature = "full", table_name = "admin_purge_comment")]
+#[cfg_attr(feature = "full", diesel(table_name = admin_purge_comment))]
 pub struct AdminPurgeCommentForm {
   pub admin_person_id: PersonId,
   pub post_id: PostId,

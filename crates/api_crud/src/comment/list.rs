@@ -11,7 +11,7 @@ use lemmy_api_common::{
 };
 use lemmy_apub::{fetcher::resolve_actor_identifier, objects::community::ApubCommunity};
 use lemmy_db_schema::{
-  source::{comment::Comment, community::Community},
+  source::{comment::Comment, community::Community, local_site::LocalSite},
   traits::{Crud, DeleteableOrRemoveable},
 };
 use lemmy_db_views::comment_view::CommentQuery;
@@ -32,13 +32,14 @@ impl PerformCrud for GetComments {
     let local_user_view =
       get_local_user_view_from_jwt_opt(data.auth.as_ref(), context.pool(), context.secret())
         .await?;
-    check_private_instance(&local_user_view, context.pool()).await?;
+    let local_site = blocking(context.pool(), LocalSite::read).await??;
+    check_private_instance(&local_user_view, &local_site)?;
 
     let community_id = data.community_id;
-    let listing_type = listing_type_with_site_default(data.type_, context.pool()).await?;
+    let listing_type = listing_type_with_site_default(data.type_, &local_site)?;
 
     let community_actor_id = if let Some(name) = &data.community_name {
-      resolve_actor_identifier::<ApubCommunity, Community>(name, context)
+      resolve_actor_identifier::<ApubCommunity, Community>(name, context, true)
         .await
         .ok()
         .map(|c| c.actor_id)
@@ -63,6 +64,7 @@ impl PerformCrud for GetComments {
       None
     };
 
+    let parent_path_cloned = parent_path.to_owned();
     let post_id = data.post_id;
     let local_user = local_user_view.map(|l| l.local_user);
     let mut comments = blocking(context.pool(), move |conn| {
@@ -74,7 +76,7 @@ impl PerformCrud for GetComments {
         .saved_only(saved_only)
         .community_id(community_id)
         .community_actor_id(community_actor_id)
-        .parent_path(parent_path)
+        .parent_path(parent_path_cloned)
         .post_id(post_id)
         .local_user(local_user.as_ref())
         .page(page)

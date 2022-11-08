@@ -120,7 +120,7 @@ impl ActivityHandler for CreateOrUpdatePost {
           verify_mod_action(
             &self.actor,
             self.object.id.inner(),
-            &community,
+            community.id,
             context,
             request_counter,
           )
@@ -149,7 +149,7 @@ impl ActivityHandler for CreateOrUpdatePost {
       person_id: post.creator_id,
       score: 1,
     };
-    blocking(context.pool(), move |conn: &'_ _| {
+    blocking(context.pool(), move |conn: &mut _| {
       PostLike::like(conn, &like_form)
     })
     .await??;

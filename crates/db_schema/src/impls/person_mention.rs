@@ -6,14 +6,18 @@ use crate::{
 use diesel::{dsl::*, result::Error, *};
 
 impl Crud for PersonMention {
-  type Form = PersonMentionForm;
+  type InsertForm = PersonMentionInsertForm;
+  type UpdateForm = PersonMentionUpdateForm;
   type IdType = PersonMentionId;
-  fn read(conn: &PgConnection, person_mention_id: PersonMentionId) -> Result<Self, Error> {
+  fn read(conn: &mut PgConnection, person_mention_id: PersonMentionId) -> Result<Self, Error> {
     use crate::schema::person_mention::dsl::*;
     person_mention.find(person_mention_id).first::<Self>(conn)
   }
 
-  fn create(conn: &PgConnection, person_mention_form: &PersonMentionForm) -> Result<Self, Error> {
+  fn create(
+    conn: &mut PgConnection,
+    person_mention_form: &Self::InsertForm,
+  ) -> Result<Self, Error> {
     use crate::schema::person_mention::dsl::*;
     // since the return here isnt utilized, we dont need to do an update
     // but get_result doesnt return the existing row here
@@ -26,9 +30,9 @@ impl Crud for PersonMention {
   }
 
   fn update(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     person_mention_id: PersonMentionId,
-    person_mention_form: &PersonMentionForm,
+    person_mention_form: &Self::UpdateForm,
   ) -> Result<Self, Error> {
     use crate::schema::person_mention::dsl::*;
     diesel::update(person_mention.find(person_mention_id))
@@ -38,19 +42,8 @@ impl Crud for PersonMention {
 }
 
 impl PersonMention {
-  pub fn update_read(
-    conn: &PgConnection,
-    person_mention_id: PersonMentionId,
-    new_read: bool,
-  ) -> Result<PersonMention, Error> {
-    use crate::schema::person_mention::dsl::*;
-    diesel::update(person_mention.find(person_mention_id))
-      .set(read.eq(new_read))
-      .get_result::<Self>(conn)
-  }
-
   pub fn mark_all_as_read(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     for_recipient_id: PersonId,
   ) -> Result<Vec<PersonMention>, Error> {
     use crate::schema::person_mention::dsl::*;
@@ -62,8 +55,9 @@ impl PersonMention {
     .set(read.eq(true))
     .get_results::<Self>(conn)
   }
+
   pub fn read_by_comment_and_person(
-    conn: &PgConnection,
+    conn: &mut PgConnection,
     for_comment_id: CommentId,
     for_recipient_id: PersonId,
   ) -> Result<Self, Error> {
@@ -80,7 +74,8 @@ mod tests {
   use crate::{
     source::{
       comment::*,
-      community::{Community, CommunityForm},
+      community::{Community, CommunityInsertForm},
+      instance::Instance,
       person::*,
       person_mention::*,
       post::*,
@@ -93,58 +88,58 @@ mod tests {
   #[test]
   #[serial]
   fn test_crud() {
-    let conn = establish_unpooled_connection();
+    let conn = &mut establish_unpooled_connection();
 
-    let new_person = PersonForm {
-      name: "terrylake".into(),
-      public_key: Some("pubkey".to_string()),
-      ..PersonForm::default()
-    };
+    let inserted_instance = Instance::create(conn, "my_domain.tld").unwrap();
 
-    let inserted_person = Person::create(&conn, &new_person).unwrap();
+    let new_person = PersonInsertForm::builder()
+      .name("terrylake".into())
+      .public_key("pubkey".to_string())
+      .instance_id(inserted_instance.id)
+      .build();
 
-    let recipient_form = PersonForm {
-      name: "terrylakes recipient".into(),
-      public_key: Some("pubkey".to_string()),
-      ..PersonForm::default()
-    };
+    let inserted_person = Person::create(conn, &new_person).unwrap();
 
-    let inserted_recipient = Person::create(&conn, &recipient_form).unwrap();
+    let recipient_form = PersonInsertForm::builder()
+      .name("terrylakes recipient".into())
+      .public_key("pubkey".to_string())
+      .instance_id(inserted_instance.id)
+      .build();
 
-    let new_community = CommunityForm {
-      name: "test community lake".to_string(),
-      title: "nada".to_owned(),
-      public_key: Some("pubkey".to_string()),
-      ..CommunityForm::default()
-    };
+    let inserted_recipient = Person::create(conn, &recipient_form).unwrap();
 
-    let inserted_community = Community::create(&conn, &new_community).unwrap();
+    let new_community = CommunityInsertForm::builder()
+      .name("test community lake".to_string())
+      .title("nada".to_owned())
+      .public_key("pubkey".to_string())
+      .instance_id(inserted_instance.id)
+      .build();
 
-    let new_post = PostForm {
-      name: "A test post".into(),
-      creator_id: inserted_person.id,
-      community_id: inserted_community.id,
-      ..PostForm::default()
-    };
+    let inserted_community = Community::create(conn, &new_community).unwrap();
 
-    let inserted_post = Post::create(&conn, &new_post).unwrap();
+    let new_post = PostInsertForm::builder()
+      .name("A test post".into())
+      .creator_id(inserted_person.id)
+      .community_id(inserted_community.id)
+      .build();
 
-    let comment_form = CommentForm {
-      content: "A test comment".into(),
-      creator_id: inserted_person.id,
-      post_id: inserted_post.id,
-      ..CommentForm::default()
-    };
+    let inserted_post = Post::create(conn, &new_post).unwrap();
 
-    let inserted_comment = Comment::create(&conn, &comment_form, None).unwrap();
+    let comment_form = CommentInsertForm::builder()
+      .content("A test comment".into())
+      .creator_id(inserted_person.id)
+      .post_id(inserted_post.id)
+      .build();
 
-    let person_mention_form = PersonMentionForm {
+    let inserted_comment = Comment::create(conn, &comment_form, None).unwrap();
+
+    let person_mention_form = PersonMentionInsertForm {
       recipient_id: inserted_recipient.id,
       comment_id: inserted_comment.id,
       read: None,
     };
 
-    let inserted_mention = PersonMention::create(&conn, &person_mention_form).unwrap();
+    let inserted_mention = PersonMention::create(conn, &person_mention_form).unwrap();
 
     let expected_mention = PersonMention {
       id: inserted_mention.id,
@@ -154,14 +149,17 @@ mod tests {
       published: inserted_mention.published,
     };
 
-    let read_mention = PersonMention::read(&conn, inserted_mention.id).unwrap();
+    let read_mention = PersonMention::read(conn, inserted_mention.id).unwrap();
+
+    let person_mention_update_form = PersonMentionUpdateForm { read: Some(false) };
     let updated_mention =
-      PersonMention::update(&conn, inserted_mention.id, &person_mention_form).unwrap();
-    Comment::delete(&conn, inserted_comment.id).unwrap();
-    Post::delete(&conn, inserted_post.id).unwrap();
-    Community::delete(&conn, inserted_community.id).unwrap();
-    Person::delete(&conn, inserted_person.id).unwrap();
-    Person::delete(&conn, inserted_recipient.id).unwrap();
+      PersonMention::update(conn, inserted_mention.id, &person_mention_update_form).unwrap();
+    Comment::delete(conn, inserted_comment.id).unwrap();
+    Post::delete(conn, inserted_post.id).unwrap();
+    Community::delete(conn, inserted_community.id).unwrap();
+    Person::delete(conn, inserted_person.id).unwrap();
+    Person::delete(conn, inserted_recipient.id).unwrap();
+    Instance::delete(conn, inserted_instance.id).unwrap();
 
     assert_eq!(expected_mention, read_mention);
     assert_eq!(expected_mention, inserted_mention);

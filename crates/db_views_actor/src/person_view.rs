@@ -14,7 +14,7 @@ use typed_builder::TypedBuilder;
 type PersonViewSafeTuple = (PersonSafe, PersonAggregates);
 
 impl PersonViewSafe {
-  pub fn read(conn: &PgConnection, person_id: PersonId) -> Result<Self, Error> {
+  pub fn read(conn: &mut PgConnection, person_id: PersonId) -> Result<Self, Error> {
     let (person, counts) = person::table
       .find(person_id)
       .inner_join(person_aggregates::table)
@@ -23,18 +23,19 @@ impl PersonViewSafe {
     Ok(Self { person, counts })
   }
 
-  pub fn admins(conn: &PgConnection) -> Result<Vec<Self>, Error> {
+  pub fn admins(conn: &mut PgConnection) -> Result<Vec<Self>, Error> {
     let admins = person::table
       .inner_join(person_aggregates::table)
       .select((Person::safe_columns_tuple(), person_aggregates::all_columns))
       .filter(person::admin.eq(true))
+      .filter(person::deleted.eq(false))
       .order_by(person::published)
       .load::<PersonViewSafeTuple>(conn)?;
 
     Ok(Self::from_tuple_to_vec(admins))
   }
 
-  pub fn banned(conn: &PgConnection) -> Result<Vec<Self>, Error> {
+  pub fn banned(conn: &mut PgConnection) -> Result<Vec<Self>, Error> {
     let banned = person::table
       .inner_join(person_aggregates::table)
       .select((Person::safe_columns_tuple(), person_aggregates::all_columns))
@@ -45,6 +46,7 @@ impl PersonViewSafe {
             .or(person::ban_expires.gt(now)),
         ),
       )
+      .filter(person::deleted.eq(false))
       .load::<PersonViewSafeTuple>(conn)?;
 
     Ok(Self::from_tuple_to_vec(banned))
@@ -55,7 +57,7 @@ impl PersonViewSafe {
 #[builder(field_defaults(default))]
 pub struct PersonQuery<'a> {
   #[builder(!default)]
-  conn: &'a PgConnection,
+  conn: &'a mut PgConnection,
   sort: Option<SortType>,
   search_term: Option<String>,
   page: Option<i64>,
@@ -70,7 +72,10 @@ impl<'a> PersonQuery<'a> {
       .into_boxed();
 
     if let Some(search_term) = self.search_term {
-      query = query.filter(person::name.ilike(fuzzy_search(&search_term)));
+      let searcher = fuzzy_search(&search_term);
+      query = query
+        .filter(person::name.ilike(searcher.to_owned()))
+        .or_filter(person::display_name.ilike(searcher));
     }
 
     query = match self.sort.unwrap_or(SortType::Hot) {

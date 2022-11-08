@@ -13,7 +13,10 @@ use lemmy_db_schema::{
 type CommunityFollowerViewTuple = (CommunitySafe, PersonSafe);
 
 impl CommunityFollowerView {
-  pub fn for_community(conn: &PgConnection, community_id: CommunityId) -> Result<Vec<Self>, Error> {
+  pub fn for_community(
+    conn: &mut PgConnection,
+    community_id: CommunityId,
+  ) -> Result<Vec<Self>, Error> {
     let res = community_follower::table
       .inner_join(community::table)
       .inner_join(person::table)
@@ -28,7 +31,7 @@ impl CommunityFollowerView {
     Ok(Self::from_tuple_to_vec(res))
   }
 
-  pub fn for_person(conn: &PgConnection, person_id: PersonId) -> Result<Vec<Self>, Error> {
+  pub fn for_person(conn: &mut PgConnection, person_id: PersonId) -> Result<Vec<Self>, Error> {
     let res = community_follower::table
       .inner_join(community::table)
       .inner_join(person::table)
@@ -37,6 +40,8 @@ impl CommunityFollowerView {
         Person::safe_columns_tuple(),
       ))
       .filter(community_follower::person_id.eq(person_id))
+      .filter(community::deleted.eq(false))
+      .filter(community::removed.eq(false))
       .order_by(community::title)
       .load::<CommunityFollowerViewTuple>(conn)?;
 

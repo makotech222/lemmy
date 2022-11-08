@@ -1,10 +1,14 @@
 use crate::{
   activities::{verify_is_public, verify_person_in_community},
   check_apub_id_valid_with_strictness,
+  fetch_local_site_data,
   local_instance,
   mentions::collect_non_local_mentions,
   objects::{read_from_string_or_source, verify_is_remote_object},
-  protocol::{objects::note::Note, Source},
+  protocol::{
+    objects::{note::Note, LanguageTag},
+    Source,
+  },
   PostOrComment,
 };
 use activitypub_federation::{
@@ -15,11 +19,12 @@ use activitypub_federation::{
 };
 use activitystreams_kinds::{object::NoteType, public};
 use chrono::NaiveDateTime;
-use lemmy_api_common::utils::blocking;
+use lemmy_api_common::utils::{blocking, local_site_opt_to_slur_regex};
 use lemmy_db_schema::{
   source::{
-    comment::{Comment, CommentForm},
+    comment::{Comment, CommentInsertForm, CommentUpdateForm},
     community::Community,
+    local_site::LocalSite,
     person::Person,
     post::Post,
   },
@@ -78,7 +83,8 @@ impl ApubObject for ApubComment {
   async fn delete(self, context: &LemmyContext) -> Result<(), LemmyError> {
     if !self.deleted {
       blocking(context.pool(), move |conn| {
-        Comment::update_deleted(conn, self.id, true)
+        let form = CommentUpdateForm::builder().deleted(Some(true)).build();
+        Comment::update(conn, self.id, &form)
       })
       .await??;
     }
@@ -105,6 +111,7 @@ impl ApubObject for ApubComment {
     } else {
       ObjectId::<PostOrComment>::new(post.ap_id)
     };
+    let language = LanguageTag::new_single(self.language_id, context.pool()).await?;
     let maa =
       collect_non_local_mentions(&self, ObjectId::new(community.actor_id), context, &mut 0).await?;
 
@@ -122,6 +129,7 @@ impl ApubObject for ApubComment {
       updated: self.updated.map(convert_datetime),
       tag: maa.tags,
       distinguished: Some(self.distinguished),
+      language,
     };
 
     Ok(note)
@@ -143,7 +151,14 @@ impl ApubObject for ApubComment {
       Community::read(conn, community_id)
     })
     .await??;
-    check_apub_id_valid_with_strictness(note.id.inner(), community.local, context.settings())?;
+    let local_site_data = blocking(context.pool(), fetch_local_site_data).await??;
+
+    check_apub_id_valid_with_strictness(
+      note.id.inner(),
+      community.local,
+      &local_site_data,
+      context.settings(),
+    )?;
     verify_is_remote_object(note.id.inner(), context.settings())?;
     verify_person_in_community(
       &note.attributed_to,
@@ -174,19 +189,24 @@ impl ApubObject for ApubComment {
     let (post, parent_comment) = note.get_parents(context, request_counter).await?;
 
     let content = read_from_string_or_source(&note.content, &note.media_type, &note.source);
-    let content_slurs_removed = remove_slurs(&content, &context.settings().slur_regex());
 
-    let form = CommentForm {
+    let local_site = blocking(context.pool(), LocalSite::read).await?.ok();
+    let slur_regex = &local_site_opt_to_slur_regex(&local_site);
+    let content_slurs_removed = remove_slurs(&content, slur_regex);
+    let language_id = LanguageTag::to_language_id_single(note.language, context.pool()).await?;
+
+    let form = CommentInsertForm {
       creator_id: creator.id,
       post_id: post.id,
       content: content_slurs_removed,
       removed: None,
       published: note.published.map(|u| u.naive_local()),
       updated: note.updated.map(|u| u.naive_local()),
-      deleted: None,
+      deleted: Some(false),
       ap_id: Some(note.id.into()),
       distinguished: note.distinguished,
       local: Some(false),
+      language_id,
     };
     let parent_comment_path = parent_comment.map(|t| t.0.path);
     let comment = blocking(context.pool(), move |conn| {
@@ -232,16 +252,19 @@ pub(crate) mod tests {
   }
 
   fn cleanup(data: (ApubPerson, ApubCommunity, ApubPost, ApubSite), context: &LemmyContext) {
-    Post::delete(&*context.pool().get().unwrap(), data.2.id).unwrap();
-    Community::delete(&*context.pool().get().unwrap(), data.1.id).unwrap();
-    Person::delete(&*context.pool().get().unwrap(), data.0.id).unwrap();
-    Site::delete(&*context.pool().get().unwrap(), data.3.id).unwrap();
+    let conn = &mut context.pool().get().unwrap();
+    Post::delete(conn, data.2.id).unwrap();
+    Community::delete(conn, data.1.id).unwrap();
+    Person::delete(conn, data.0.id).unwrap();
+    Site::delete(conn, data.3.id).unwrap();
+    LocalSite::delete(conn).unwrap();
   }
 
   #[actix_rt::test]
   #[serial]
   pub(crate) async fn test_parse_lemmy_comment() {
     let context = init_context();
+    let conn = &mut context.pool().get().unwrap();
     let url = Url::parse("https://enterprise.lemmy.ml/comment/38741").unwrap();
     let data = prepare_comment_test(&url, &context).await;
 
@@ -263,7 +286,7 @@ pub(crate) mod tests {
     let to_apub = comment.into_apub(&context).await.unwrap();
     assert_json_include!(actual: json, expected: to_apub);
 
-    Comment::delete(&*context.pool().get().unwrap(), comment_id).unwrap();
+    Comment::delete(conn, comment_id).unwrap();
     cleanup(data, &context);
   }
 
@@ -271,6 +294,7 @@ pub(crate) mod tests {
   #[serial]
   async fn test_parse_pleroma_comment() {
     let context = init_context();
+    let conn = &mut context.pool().get().unwrap();
     let url = Url::parse("https://enterprise.lemmy.ml/comment/38741").unwrap();
     let data = prepare_comment_test(&url, &context).await;
 
@@ -298,7 +322,7 @@ pub(crate) mod tests {
     assert!(!comment.local);
     assert_eq!(request_counter, 0);
 
-    Comment::delete(&*context.pool().get().unwrap(), comment.id).unwrap();
+    Comment::delete(conn, comment.id).unwrap();
     cleanup(data, &context);
   }
 
