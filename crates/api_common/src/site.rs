@@ -9,6 +9,7 @@ use lemmy_db_schema::{
 };
 use lemmy_db_views::structs::{
   CommentView,
+  CustomEmojiView,
   LocalUserSettingsView,
   PostView,
   RegistrationApplicationView,
@@ -219,6 +220,7 @@ pub struct GetSiteResponse {
   pub all_languages: Vec<Language>,
   pub discussion_languages: Vec<LanguageId>,
   pub taglines: Option<Vec<Tagline>>,
+  pub custom_emojis: Option<Vec<CustomEmojiView>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
